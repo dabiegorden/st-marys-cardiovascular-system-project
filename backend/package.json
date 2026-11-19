@@ -1,31 +1,42 @@
 {
   "name": "backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "server.js",
+  "description": "St. Mary's Hospital, Drobo - Cardiovascular disease prediction API (Express + ONNX + PostgreSQL/Drizzle)",
+  "main": "src/server.js",
   "scripts": {
-    "dev": "nodemon src/server.js",
+    "dev": "nodemon --watch src src/server.js",
     "start": "node src/server.js",
-    "setup": "node scripts/setup-python.js",
-    "copy-python": "node scripts/copy-python-script.js"
+    "test": "node --test \"test/**/*.test.js\"",
+    "seed:admin": "node scripts/seed-admin.js",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "module",
   "dependencies": {
-    "@google/genai": "^1.36.0",
-    "@google/generative-ai": "^0.24.1",
-    "body-parser": "^2.2.1",
+    "@neondatabase/serverless": "^1.2.1",
+    "better-auth": "^1.7.26",
     "cors": "^2.8.5",
-    "dotenv": "^17.2.3",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.4",
     "express": "^5.1.0",
-    "mongoose": "^8.16.2",
+    "helmet": "^8.3.0",
     "morgan": "^1.10.1",
     "multer": "^2.0.2",
     "nodemon": "^3.1.11",
     "onnxruntime-node": "^1.23.2",
-    "path": "^0.12.7",
-    "url": "^0.11.4"
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "drizzle-kit": "^0.31.11",
+    "supertest": "^7.3.2",
+    "tsx": "^4.23.15"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

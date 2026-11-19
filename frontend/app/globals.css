@@ -3,81 +3,107 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Clinical palette: neutral surfaces, one blue accent.
+   Red / amber / green are reserved for risk communication only. */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --background: oklch(0.985 0.003 247);
+  --foreground: oklch(0.21 0.02 255);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.21 0.02 255);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.21 0.02 255);
+  --primary: oklch(0.47 0.12 245);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
+  --secondary: oklch(0.955 0.008 247);
+  --secondary-foreground: oklch(0.27 0.03 255);
+  --muted: oklch(0.955 0.008 247);
+  --muted-foreground: oklch(0.52 0.02 255);
+  --accent: oklch(0.94 0.02 245);
+  --accent-foreground: oklch(0.3 0.08 245);
+  --destructive: oklch(0.56 0.2 27);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.915 0.01 250);
+  --input: oklch(0.89 0.012 250);
+  --ring: oklch(0.6 0.12 245);
+  --chart-1: oklch(0.55 0.13 245);
+  --chart-2: oklch(0.7 0.09 200);
+  --chart-3: oklch(0.45 0.05 260);
+  --chart-4: oklch(0.78 0.04 250);
+  --chart-5: oklch(0.62 0.1 290);
+  /* Validated categorical slots (dataviz reference palette) */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --risk-low: oklch(0.58 0.13 155);
+  --risk-low-soft: oklch(0.96 0.04 155);
+  --risk-moderate: oklch(0.66 0.15 70);
+  --risk-moderate-soft: oklch(0.97 0.05 85);
+  --risk-high: oklch(0.56 0.2 27);
+  --risk-high-soft: oklch(0.96 0.03 25);
+  --radius: 0.6rem;
+  --sidebar: oklch(1 0 0);
+  --sidebar-foreground: oklch(0.3 0.02 255);
+  --sidebar-primary: oklch(0.47 0.12 245);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar-accent: oklch(0.95 0.02 245);
+  --sidebar-accent-foreground: oklch(0.32 0.09 245);
+  --sidebar-border: oklch(0.92 0.01 250);
+  --sidebar-ring: oklch(0.6 0.12 245);
 }
 
 .dark {
-  /* Updated to healthcare dark mode - deep slate with medical blue/cyan accents */
-  --background: oklch(0.06 0 0);
-  --foreground: oklch(0.98 0 0);
-  --card: oklch(0.12 0 0);
-  --card-foreground: oklch(0.95 0 0);
-  --popover: oklch(0.12 0 0);
-  --popover-foreground: oklch(0.95 0 0);
-  --primary: oklch(0.55 0.18 261.01);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.2 0 0);
-  --secondary-foreground: oklch(0.98 0 0);
-  --muted: oklch(0.3 0 0);
-  --muted-foreground: oklch(0.65 0 0);
-  --accent: oklch(0.6 0.21 261.5);
-  --accent-foreground: oklch(0.05 0 0);
-  --destructive: oklch(0.5 0.23 27.3);
+  --background: oklch(0.17 0.015 255);
+  --foreground: oklch(0.95 0.005 250);
+  --card: oklch(0.21 0.018 255);
+  --card-foreground: oklch(0.95 0.005 250);
+  --popover: oklch(0.21 0.018 255);
+  --popover-foreground: oklch(0.95 0.005 250);
+  --primary: oklch(0.68 0.12 245);
+  --primary-foreground: oklch(0.17 0.02 255);
+  --secondary: oklch(0.26 0.02 255);
+  --secondary-foreground: oklch(0.95 0.005 250);
+  --muted: oklch(0.26 0.02 255);
+  --muted-foreground: oklch(0.7 0.02 255);
+  --accent: oklch(0.29 0.04 250);
+  --accent-foreground: oklch(0.92 0.03 245);
+  --destructive: oklch(0.62 0.19 25);
   --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.18 0 0);
-  --input: oklch(0.15 0 0);
-  --ring: oklch(0.55 0.18 261.01);
-  --chart-1: oklch(0.6 0.22 261);
-  --chart-2: oklch(0.65 0.2 200);
-  --chart-3: oklch(0.58 0.19 280);
-  --chart-4: oklch(0.62 0.21 140);
-  --chart-5: oklch(0.55 0.18 310);
-  --sidebar: oklch(0.08 0 0);
-  --sidebar-foreground: oklch(0.98 0 0);
-  --sidebar-primary: oklch(0.55 0.18 261.01);
-  --sidebar-primary-foreground: oklch(0.98 0 0);
-  --sidebar-accent: oklch(0.6 0.21 261.5);
-  --sidebar-accent-foreground: oklch(0.05 0 0);
-  --sidebar-border: oklch(0.18 0 0);
-  --sidebar-ring: oklch(0.55 0.18 261.01);
+  --border: oklch(0.3 0.02 255);
+  --input: oklch(0.34 0.02 255);
+  --ring: oklch(0.6 0.12 245);
+  --chart-1: oklch(0.68 0.12 245);
+  --chart-2: oklch(0.72 0.09 200);
+  --chart-3: oklch(0.6 0.04 260);
+  --chart-4: oklch(0.45 0.03 255);
+  --chart-5: oklch(0.7 0.1 290);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --risk-low: oklch(0.7 0.13 155);
+  --risk-low-soft: oklch(0.3 0.05 155);
+  --risk-moderate: oklch(0.78 0.14 75);
+  --risk-moderate-soft: oklch(0.32 0.05 75);
+  --risk-high: oklch(0.67 0.19 25);
+  --risk-high-soft: oklch(0.32 0.06 25);
+  --sidebar: oklch(0.19 0.016 255);
+  --sidebar-foreground: oklch(0.88 0.01 250);
+  --sidebar-primary: oklch(0.68 0.12 245);
+  --sidebar-primary-foreground: oklch(0.17 0.02 255);
+  --sidebar-accent: oklch(0.27 0.03 250);
+  --sidebar-accent-foreground: oklch(0.95 0.01 250);
+  --sidebar-border: oklch(0.28 0.02 255);
+  --sidebar-ring: oklch(0.6 0.12 245);
 }
 
 @theme inline {
-  --font-sans: "Geist", "Geist Fallback";
-  --font-mono: "Geist Mono", "Geist Mono Fallback";
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+  --color-risk-low: var(--risk-low);
+  --color-risk-low-soft: var(--risk-low-soft);
+  --color-risk-moderate: var(--risk-moderate);
+  --color-risk-moderate-soft: var(--risk-moderate-soft);
+  --color-risk-high: var(--risk-high);
+  --color-risk-high-soft: var(--risk-high-soft);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -123,4 +149,11 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* Printable assessment report */
+@media print {
+  .no-print { display: none !important; }
+  body { background: white; }
+  .print-area { box-shadow: none !important; border: none !important; }
 }

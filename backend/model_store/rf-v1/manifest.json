@@ -1,0 +1,1441 @@
+{
+  "version": "rf-v1",
+  "algorithm": "random_forest",
+  "created_at": "2026-11-19T16:41:43.067248+00:00",
+  "framework": {
+    "scikit_learn": "1.7.2",
+    "onnxruntime": "1.23.2"
+  },
+  "onnx": {
+    "file": "model.onnx",
+    "input": "input",
+    "probability_output": "probabilities",
+    "outputs": [
+      "label",
+      "probabilities"
+    ],
+    "max_abs_diff_vs_sklearn": 7.003756559154084e-07
+  },
+  "features": [
+    {
+      "name": "age",
+      "label": "Age",
+      "group": "Demographics",
+      "type": "number",
+      "unit": "years",
+      "step": 1,
+      "min": 18,
+      "max": 100,
+      "required": true,
+      "help": "Patient age in completed years."
+    },
+    {
+      "name": "sex",
+      "label": "Sex",
+      "group": "Demographics",
+      "type": "category",
+      "required": true,
+      "options": [
+        {
+          "value": 0,
+          "label": "Female"
+        },
+        {
+          "value": 1,
+          "label": "Male"
+        }
+      ]
+    },
+    {
+      "name": "resting_bp",
+      "label": "Resting blood pressure (systolic)",
+      "group": "Vital signs",
+      "type": "number",
+      "unit": "mmHg",
+      "step": 1,
+      "min": 70,
+      "max": 250,
+      "required": true,
+      "help": "Systolic blood pressure at rest."
+    },
+    {
+      "name": "max_heart_rate",
+      "label": "Maximum heart rate achieved",
+      "group": "Vital signs",
+      "type": "number",
+      "unit": "bpm",
+      "step": 1,
+      "min": 50,
+      "max": 230,
+      "required": true,
+      "help": "Highest heart rate reached during the exercise test."
+    },
+    {
+      "name": "cholesterol",
+      "label": "Serum cholesterol",
+      "group": "Laboratory",
+      "type": "number",
+      "unit": "mg/dL",
+      "step": 1,
+      "min": 80,
+      "max": 650,
+      "required": false,
+      "help": "Leave blank if not measured \u2013 the model substitutes the training median and the result is flagged."
+    },
+    {
+      "name": "fasting_blood_sugar",
+      "label": "Fasting blood sugar > 120 mg/dL",
+      "group": "Laboratory",
+      "type": "category",
+      "required": true,
+      "options": [
+        {
+          "value": 0,
+          "label": "No"
+        },
+        {
+          "value": 1,
+          "label": "Yes"
+        }
+      ]
+    },
+    {
+      "name": "chest_pain_type",
+      "label": "Chest pain type",
+      "group": "Symptoms",
+      "type": "category",
+      "required": true,
+      "options": [
+        {
+          "value": 0,
+          "label": "Typical angina"
+        },
+        {
+          "value": 1,
+          "label": "Atypical angina"
+        },
+        {
+          "value": 2,
+          "label": "Non-anginal pain"
+        },
+        {
+          "value": 3,
+          "label": "Asymptomatic"
+        }
+      ]
+    },
+    {
+      "name": "exercise_angina",
+      "label": "Exercise-induced angina",
+      "group": "Symptoms",
+      "type": "category",
+      "required": true,
+      "options": [
+        {
+          "value": 0,
+          "label": "No"
+        },
+        {
+          "value": 1,
+          "label": "Yes"
+        }
+      ]
+    },
+    {
+      "name": "resting_ecg",
+      "label": "Resting ECG",
+      "group": "ECG & exercise test",
+      "type": "category",
+      "required": true,
+      "options": [
+        {
+          "value": 0,
+          "label": "Normal"
+        },
+        {
+          "value": 1,
+          "label": "ST-T wave abnormality"
+        },
+        {
+          "value": 2,
+          "label": "Left ventricular hypertrophy"
+        }
+      ]
+    },
+    {
+      "name": "oldpeak",
+      "label": "ST depression (oldpeak)",
+      "group": "ECG & exercise test",
+      "type": "number",
+      "unit": "mm",
+      "step": 0.1,
+      "min": -3,
+      "max": 7,
+      "required": true,
+      "help": "ST depression induced by exercise relative to rest."
+    },
+    {
+      "name": "slope",
+      "label": "Slope of peak exercise ST segment",
+      "group": "ECG & exercise test",
+      "type": "category",
+      "required": true,
+      "options": [
+        {
+          "value": 1,
+          "label": "Upsloping"
+        },
+        {
+          "value": 2,
+          "label": "Flat"
+        },
+        {
+          "value": 3,
+          "label": "Downsloping"
+        }
+      ]
+    }
+  ],
+  "feature_order": [
+    "age",
+    "sex",
+    "resting_bp",
+    "max_heart_rate",
+    "cholesterol",
+    "fasting_blood_sugar",
+    "chest_pain_type",
+    "exercise_angina",
+    "resting_ecg",
+    "oldpeak",
+    "slope"
+  ],
+  "feature_stats": {
+    "age": {
+      "min": 20.0,
+      "max": 80.0,
+      "median": 49.0,
+      "reference": 49.0
+    },
+    "sex": {
+      "min": 0.0,
+      "max": 1.0,
+      "median": 1.0,
+      "reference": 1.0
+    },
+    "resting_bp": {
+      "min": 94.0,
+      "max": 200.0,
+      "median": 146.5,
+      "reference": 146.5
+    },
+    "max_heart_rate": {
+      "min": 71.0,
+      "max": 202.0,
+      "median": 147.0,
+      "reference": 147.0
+    },
+    "cholesterol": {
+      "min": 85.0,
+      "max": 601.0,
+      "median": 325.0,
+      "reference": 325.0
+    },
+    "fasting_blood_sugar": {
+      "min": 0.0,
+      "max": 1.0,
+      "median": 0.0,
+      "reference": 0.0
+    },
+    "chest_pain_type": {
+      "min": 0.0,
+      "max": 3.0,
+      "median": 1.0,
+      "reference": 0.0
+    },
+    "exercise_angina": {
+      "min": 0.0,
+      "max": 1.0,
+      "median": 0.0,
+      "reference": 0.0
+    },
+    "resting_ecg": {
+      "min": 0.0,
+      "max": 2.0,
+      "median": 1.0,
+      "reference": 0.0
+    },
+    "oldpeak": {
+      "min": 0.0,
+      "max": 6.2,
+      "median": 2.4,
+      "reference": 2.4
+    },
+    "slope": {
+      "min": 0.0,
+      "max": 3.0,
+      "median": 2.0,
+      "reference": 2.0
+    }
+  },
+  "missing_value_strategy": "median imputation inside the ONNX graph (send NaN for unknown)",
+  "decision_threshold": 0.5,
+  "risk_bands": [
+    {
+      "name": "low",
+      "label": "Low",
+      "min": 0.0,
+      "max": 0.3
+    },
+    {
+      "name": "moderate",
+      "label": "Moderate",
+      "min": 0.3,
+      "max": 0.6
+    },
+    {
+      "name": "high",
+      "label": "High",
+      "min": 0.6,
+      "max": 1.0
+    }
+  ],
+  "hyperparameters": {
+    "max_depth": 8,
+    "max_features": "sqrt",
+    "min_samples_leaf": 1,
+    "n_estimators": 200,
+    "random_state": 42,
+    "search": {
+      "grid": {
+        "rf__n_estimators": [
+          200,
+          400
+        ],
+        "rf__max_depth": [
+          null,
+          8,
+          16
+        ],
+        "rf__min_samples_leaf": [
+          1,
+          3,
+          5
+        ],
+        "rf__max_features": [
+          "sqrt",
+          0.5
+        ]
+      },
+      "cv_folds": 5,
+      "scoring": "roc_auc",
+      "best_cv_score": 0.9958610800875582
+    }
+  },
+  "training_data": {
+    "name": "Cardiovascular_Disease_Dataset.xlsx",
+    "schema": "cardiovascular",
+    "sha256": "e83f37e00084f608630c58cd3fabeb25442e0f53cc0e36db5ac2692d12f65ae6",
+    "data_report": {
+      "rows_raw": 1000,
+      "schema": "cardiovascular",
+      "dropped_invalid_target": 0,
+      "zero_as_missing": {
+        "resting_bp": 0,
+        "cholesterol": 53
+      },
+      "dropped_duplicates": 0,
+      "rows_used": 1000,
+      "missing_values": {
+        "cholesterol": 53
+      },
+      "positive_rate": 0.58
+    },
+    "split": {
+      "test_size": 0.2,
+      "stratified": true,
+      "random_state": 42
+    },
+    "n_train": 800,
+    "n_test": 200
+  },
+  "evaluation": {
+    "cross_validation": {
+      "accuracy": {
+        "mean": 0.9762500000000001,
+        "std": 0.014469796128487767
+      },
+      "precision": {
+        "mean": 0.9766963107369566,
+        "std": 0.01666920583530877
+      },
+      "recall": {
+        "mean": 0.982748948106592,
+        "std": 0.01459973484395298
+      },
+      "f1": {
+        "mean": 0.9796187487381722,
+        "std": 0.012382911867739956
+      },
+      "roc_auc": {
+        "mean": 0.9958610800875582,
+        "std": 0.005555817040386421
+      }
+    },
+    "internal_test": {
+      "n": 200,
+      "positives": 116,
+      "accuracy": 0.99,
+      "precision": 0.9913793103448276,
+      "recall": 0.9913793103448276,
+      "specificity": 0.9880952380952381,
+      "f1": 0.9913793103448276,
+      "roc_auc": 0.9992816091954023,
+      "brier": 0.014257177709568606,
+      "confusion_matrix": {
+        "tn": 83,
+        "fp": 1,
+        "fn": 1,
+        "tp": 115
+      },
+      "threshold": 0.5,
+      "roc_curve": [
+        {
+          "fpr": 0.0,
+          "tpr": 0.0
+        },
+        {
+          "fpr": 0.0,
+          "tpr": 0.008620689655172414
+        },
+        {
+          "fpr": 0.0,
+          "tpr": 0.02586206896551724
+        },
+        {
+          "fpr": 0.0,
+          "tpr": 0.10344827586206896
+        },
+        {
+          "fpr": 0.0,
+          "tpr": 0.1206896551724138
+        },
+        {
+          "fpr": 0.0,
+          "tpr": 0.15517241379310345
+        },
+        {
+          "fpr": 0.0,
+          "tpr": 0.1724137931034483
+        },
+        {
+          "fpr": 0.0,
+          "tpr": 0.1810344827586207
+        },
+        {
+          "fpr": 0.0,
+          "tpr": 0.19827586206896552
+        },
+        {
+          "fpr": 0.0,
+          "tpr": 0.8189655172413793
+        },
+        {
+          "fpr": 0.0,
+          "tpr": 0.8362068965517241
+        },
+        {
+          "fpr": 0.0,
+          "tpr": 0.9482758620689655
+        },
+        {
+          "fpr": 0.011904761904761904,
+          "tpr": 0.9482758620689655
+        },
+        {
+          "fpr": 0.011904761904761904,
+          "tpr": 0.9913793103448276
+        },
+        {
+          "fpr": 0.023809523809523808,
+          "tpr": 0.9913793103448276
+        },
+        {
+          "fpr": 0.023809523809523808,
+          "tpr": 1.0
+        },
+        {
+          "fpr": 0.9642857142857143,
+          "tpr": 1.0
+        },
+        {
+          "fpr": 0.9880952380952381,
+          "tpr": 1.0
+        },
+        {
+          "fpr": 1.0,
+          "tpr": 1.0
+        }
+      ],
+      "calibration": [
+        {
+          "predicted": 0.018147910419608695,
+          "observed": 0.0
+        },
+        {
+          "predicted": 0.15208497991366876,
+          "observed": 0.0
+        },
+        {
+          "predicted": 0.23615959172632384,
+          "observed": 0.0
+        },
+        {
+          "predicted": 0.33732917943702073,
+          "observed": 0.3333333333333333
+        },
+        {
+          "predicted": 0.4653342355464352,
+          "observed": 0.0
+        },
+        {
+          "predicted": 0.6547340453303114,
+          "observed": 1.0
+        },
+        {
+          "predicted": 0.7631488731239056,
+          "observed": 0.75
+        },
+        {
+          "predicted": 0.8503184032285733,
+          "observed": 1.0
+        },
+        {
+          "predicted": 0.9807423178599964,
+          "observed": 1.0
+        }
+      ]
+    },
+    "external": [
+      {
+        "name": "Heart_Disease x2.xlsx",
+        "schema": "statlog",
+        "sha256": "245bdb3f2f41cd4518e6a38029225d83a40b04ff2f03c89c283782bbcbb15b1f",
+        "data_report": {
+          "rows_raw": 1190,
+          "schema": "statlog",
+          "dropped_invalid_target": 0,
+          "zero_as_missing": {
+            "resting_bp": 1,
+            "cholesterol": 172
+          },
+          "dropped_duplicates": 272,
+          "rows_used": 918,
+          "missing_values": {
+            "resting_bp": 1,
+            "cholesterol": 172
+          },
+          "positive_rate": 0.5533769063180828
+        },
+        "metrics": {
+          "n": 918,
+          "positives": 508,
+          "accuracy": 0.7799564270152506,
+          "precision": 0.7420886075949367,
+          "recall": 0.9232283464566929,
+          "specificity": 0.6024390243902439,
+          "f1": 0.8228070175438597,
+          "roc_auc": 0.8251800460917995,
+          "brier": 0.1752740353663245,
+          "confusion_matrix": {
+            "tn": 247,
+            "fp": 163,
+            "fn": 39,
+            "tp": 469
+          },
+          "threshold": 0.5,
+          "roc_curve": [
+            {
+              "fpr": 0.0,
+              "tpr": 0.0
+            },
+            {
+              "fpr": 0.0024390243902439024,
+              "tpr": 0.017716535433070866
+            },
+            {
+              "fpr": 0.012195121951219513,
+              "tpr": 0.03937007874015748
+            },
+            {
+              "fpr": 0.01707317073170732,
+              "tpr": 0.0531496062992126
+            },
+            {
+              "fpr": 0.02195121951219512,
+              "tpr": 0.09251968503937008
+            },
+            {
+              "fpr": 0.02195121951219512,
+              "tpr": 0.1220472440944882
+            },
+            {
+              "fpr": 0.03414634146341464,
+              "tpr": 0.1279527559055118
+            },
+            {
+              "fpr": 0.04390243902439024,
+              "tpr": 0.1673228346456693
+            },
+            {
+              "fpr": 0.05121951219512195,
+              "tpr": 0.1889763779527559
+            },
+            {
+              "fpr": 0.06341463414634146,
+              "tpr": 0.19881889763779528
+            },
+            {
+              "fpr": 0.07317073170731707,
+              "tpr": 0.21456692913385828
+            },
+            {
+              "fpr": 0.08048780487804878,
+              "tpr": 0.22440944881889763
+            },
+            {
+              "fpr": 0.0951219512195122,
+              "tpr": 0.24606299212598426
+            },
+            {
+              "fpr": 0.1,
+              "tpr": 0.2874015748031496
+            },
+            {
+              "fpr": 0.1073170731707317,
+              "tpr": 0.31299212598425197
+            },
+            {
+              "fpr": 0.11219512195121951,
+              "tpr": 0.35236220472440943
+            },
+            {
+              "fpr": 0.11951219512195121,
+              "tpr": 0.3661417322834646
+            },
+            {
+              "fpr": 0.12195121951219512,
+              "tpr": 0.39173228346456695
+            },
+            {
+              "fpr": 0.12439024390243902,
+              "tpr": 0.42322834645669294
+            },
+            {
+              "fpr": 0.13414634146341464,
+              "tpr": 0.4547244094488189
+            },
+            {
+              "fpr": 0.13902439024390245,
+              "tpr": 0.5492125984251969
+            },
+            {
+              "fpr": 0.14878048780487804,
+              "tpr": 0.5748031496062992
+            },
+            {
+              "fpr": 0.15609756097560976,
+              "tpr": 0.594488188976378
+            },
+            {
+              "fpr": 0.16097560975609757,
+              "tpr": 0.6358267716535433
+            },
+            {
+              "fpr": 0.16829268292682928,
+              "tpr": 0.6830708661417323
+            },
+            {
+              "fpr": 0.17317073170731706,
+              "tpr": 0.702755905511811
+            },
+            {
+              "fpr": 0.18048780487804877,
+              "tpr": 0.7145669291338582
+            },
+            {
+              "fpr": 0.1926829268292683,
+              "tpr": 0.7224409448818898
+            },
+            {
+              "fpr": 0.1975609756097561,
+              "tpr": 0.7421259842519685
+            },
+            {
+              "fpr": 0.2097560975609756,
+              "tpr": 0.7677165354330708
+            },
+            {
+              "fpr": 0.21951219512195122,
+              "tpr": 0.7716535433070866
+            },
+            {
+              "fpr": 0.22926829268292684,
+              "tpr": 0.781496062992126
+            },
+            {
+              "fpr": 0.23414634146341465,
+              "tpr": 0.7992125984251969
+            },
+            {
+              "fpr": 0.25121951219512195,
+              "tpr": 0.8031496062992126
+            },
+            {
+              "fpr": 0.26097560975609757,
+              "tpr": 0.8110236220472441
+            },
+            {
+              "fpr": 0.2658536585365854,
+              "tpr": 0.8169291338582677
+            },
+            {
+              "fpr": 0.2731707317073171,
+              "tpr": 0.8267716535433071
+            },
+            {
+              "fpr": 0.28292682926829266,
+              "tpr": 0.8307086614173228
+            },
+            {
+              "fpr": 0.2975609756097561,
+              "tpr": 0.8405511811023622
+            },
+            {
+              "fpr": 0.3170731707317073,
+              "tpr": 0.8503937007874016
+            },
+            {
+              "fpr": 0.33170731707317075,
+              "tpr": 0.860236220472441
+            },
+            {
+              "fpr": 0.33902439024390246,
+              "tpr": 0.8759842519685039
+            },
+            {
+              "fpr": 0.3439024390243902,
+              "tpr": 0.8976377952755905
+            },
+            {
+              "fpr": 0.35121951219512193,
+              "tpr": 0.9035433070866141
+            },
+            {
+              "fpr": 0.36829268292682926,
+              "tpr": 0.9153543307086615
+            },
+            {
+              "fpr": 0.3853658536585366,
+              "tpr": 0.9192913385826772
+            },
+            {
+              "fpr": 0.4,
+              "tpr": 0.9251968503937008
+            },
+            {
+              "fpr": 0.4073170731707317,
+              "tpr": 0.9311023622047244
+            },
+            {
+              "fpr": 0.44146341463414634,
+              "tpr": 0.937007874015748
+            },
+            {
+              "fpr": 0.47804878048780486,
+              "tpr": 0.9409448818897638
+            },
+            {
+              "fpr": 0.524390243902439,
+              "tpr": 0.9507874015748031
+            },
+            {
+              "fpr": 0.5634146341463414,
+              "tpr": 0.9566929133858267
+            },
+            {
+              "fpr": 0.5853658536585366,
+              "tpr": 0.9606299212598425
+            },
+            {
+              "fpr": 0.6073170731707317,
+              "tpr": 0.9665354330708661
+            },
+            {
+              "fpr": 0.6365853658536585,
+              "tpr": 0.9724409448818898
+            },
+            {
+              "fpr": 0.6829268292682927,
+              "tpr": 0.9763779527559056
+            },
+            {
+              "fpr": 0.7097560975609756,
+              "tpr": 0.984251968503937
+            },
+            {
+              "fpr": 0.7341463414634146,
+              "tpr": 0.9901574803149606
+            },
+            {
+              "fpr": 0.9658536585365853,
+              "tpr": 0.9960629921259843
+            },
+            {
+              "fpr": 1.0,
+              "tpr": 1.0
+            }
+          ],
+          "calibration": [
+            {
+              "predicted": 0.07448295640741096,
+              "observed": 0.05660377358490566
+            },
+            {
+              "predicted": 0.13120254002239212,
+              "observed": 0.03389830508474576
+            },
+            {
+              "predicted": 0.25387214146144227,
+              "observed": 0.20833333333333334
+            },
+            {
+              "predicted": 0.36241524027264654,
+              "observed": 0.18840579710144928
+            },
+            {
+              "predicted": 0.44034128311096765,
+              "observed": 0.19753086419753085
+            },
+            {
+              "predicted": 0.5490795390110602,
+              "observed": 0.38461538461538464
+            },
+            {
+              "predicted": 0.6379784008070447,
+              "observed": 0.5833333333333334
+            },
+            {
+              "predicted": 0.7447352365662147,
+              "observed": 0.5454545454545454
+            },
+            {
+              "predicted": 0.8531829244073937,
+              "observed": 0.7111111111111111
+            },
+            {
+              "predicted": 0.9572209456084315,
+              "observed": 0.8321513002364066
+            }
+          ]
+        }
+      }
+    ],
+    "external_skipped": [
+      {
+        "name": "Heart_Disease x3.xlsx",
+        "identical_to": "Heart_Disease x2.xlsx"
+      }
+    ]
+  },
+  "feature_importance": [
+    {
+      "feature": "slope",
+      "label": "Slope of peak exercise ST segment",
+      "impurity": 0.44628080418264765,
+      "permutation_mean": 0.16003694581280792,
+      "permutation_std": 0.022839912382829158
+    },
+    {
+      "feature": "chest_pain_type",
+      "label": "Chest pain type",
+      "impurity": 0.1567358840829979,
+      "permutation_mean": 0.006978653530377699,
+      "permutation_std": 0.002480524386536273
+    },
+    {
+      "feature": "resting_bp",
+      "label": "Resting blood pressure (systolic)",
+      "impurity": 0.15225329490113793,
+      "permutation_mean": 0.010632183908046,
+      "permutation_std": 0.003071351099353954
+    },
+    {
+      "feature": "cholesterol",
+      "label": "Serum cholesterol",
+      "impurity": 0.06186725370392388,
+      "permutation_mean": 0.002524630541871964,
+      "permutation_std": 0.0008854538017291789
+    },
+    {
+      "feature": "resting_ecg",
+      "label": "Resting ECG",
+      "impurity": 0.048058587336130394,
+      "permutation_mean": 0.0017754515599343267,
+      "permutation_std": 0.0007680606421209979
+    },
+    {
+      "feature": "max_heart_rate",
+      "label": "Maximum heart rate achieved",
+      "impurity": 0.04395275719432974,
+      "permutation_mean": 0.0010467980295566725,
+      "permutation_std": 0.0004324981015128211
+    },
+    {
+      "feature": "oldpeak",
+      "label": "ST depression (oldpeak)",
+      "impurity": 0.03505428441081763,
+      "permutation_mean": 0.0009133825944170892,
+      "permutation_std": 0.0003960135751554784
+    },
+    {
+      "feature": "age",
+      "label": "Age",
+      "impurity": 0.01798586611731562,
+      "permutation_mean": 5.13136288998628e-05,
+      "permutation_std": 0.00013182709953473914
+    },
+    {
+      "feature": "sex",
+      "label": "Sex",
+      "impurity": 0.01795673030224142,
+      "permutation_mean": 0.0007389162561576623,
+      "permutation_std": 0.00031397903408822073
+    },
+    {
+      "feature": "fasting_blood_sugar",
+      "label": "Fasting blood sugar > 120 mg/dL",
+      "impurity": 0.017247308306915277,
+      "permutation_mean": 4.105090311986581e-05,
+      "permutation_std": 9.405943544656013e-05
+    },
+    {
+      "feature": "exercise_angina",
+      "label": "Exercise-induced angina",
+      "impurity": 0.0026072294615426144,
+      "permutation_mean": 5.551115123125783e-17,
+      "permutation_std": 5.551115123125783e-17
+    }
+  ],
+  "baselines": [
+    {
+      "algorithm": "logistic_regression",
+      "label": "Logistic Regression",
+      "internal": {
+        "n": 200,
+        "positives": 116,
+        "accuracy": 0.975,
+        "precision": 0.9743589743589743,
+        "recall": 0.9827586206896551,
+        "specificity": 0.9642857142857143,
+        "f1": 0.9785407725321889,
+        "roc_auc": 0.9982553366174056,
+        "brier": 0.017804304595572532,
+        "confusion_matrix": {
+          "tn": 81,
+          "fp": 3,
+          "fn": 2,
+          "tp": 114
+        },
+        "threshold": 0.5
+      },
+      "external": [
+        {
+          "name": "Heart_Disease x2.xlsx",
+          "metrics": {
+            "n": 918,
+            "positives": 508,
+            "accuracy": 0.7265795206971678,
+            "precision": 0.6757865937072504,
+            "recall": 0.9724409448818898,
+            "specificity": 0.4219512195121951,
+            "f1": 0.7974172719935432,
+            "roc_auc": 0.8638371423084311,
+            "brier": 0.206751291247543,
+            "confusion_matrix": {
+              "tn": 173,
+              "fp": 237,
+              "fn": 14,
+              "tp": 494
+            },
+            "threshold": 0.5
+          }
+        }
+      ]
+    },
+    {
+      "algorithm": "decision_tree",
+      "label": "Decision Tree",
+      "internal": {
+        "n": 200,
+        "positives": 116,
+        "accuracy": 0.97,
+        "precision": 0.9741379310344828,
+        "recall": 0.9741379310344828,
+        "specificity": 0.9642857142857143,
+        "f1": 0.9741379310344828,
+        "roc_auc": 0.9692118226600985,
+        "brier": 0.03,
+        "confusion_matrix": {
+          "tn": 81,
+          "fp": 3,
+          "fn": 3,
+          "tp": 113
+        },
+        "threshold": 0.5
+      },
+      "external": [
+        {
+          "name": "Heart_Disease x2.xlsx",
+          "metrics": {
+            "n": 918,
+            "positives": 508,
+            "accuracy": 0.6710239651416122,
+            "precision": 0.6442577030812325,
+            "recall": 0.905511811023622,
+            "specificity": 0.3804878048780488,
+            "f1": 0.7528641571194763,
+            "roc_auc": 0.6429998079508354,
+            "brier": 0.3289760348583878,
+            "confusion_matrix": {
+              "tn": 156,
+              "fp": 254,
+              "fn": 48,
+              "tp": 460
+            },
+            "threshold": 0.5
+          }
+        }
+      ]
+    },
+    {
+      "algorithm": "svm",
+      "label": "Support Vector Machine (RBF)",
+      "internal": {
+        "n": 200,
+        "positives": 116,
+        "accuracy": 0.975,
+        "precision": 0.9663865546218487,
+        "recall": 0.9913793103448276,
+        "specificity": 0.9523809523809523,
+        "f1": 0.9787234042553191,
+        "roc_auc": 0.9974343185550082,
+        "brier": 0.019521075773937958,
+        "confusion_matrix": {
+          "tn": 80,
+          "fp": 4,
+          "fn": 1,
+          "tp": 115
+        },
+        "threshold": 0.5
+      },
+      "external": [
+        {
+          "name": "Heart_Disease x2.xlsx",
+          "metrics": {
+            "n": 918,
+            "positives": 508,
+            "accuracy": 0.7450980392156863,
+            "precision": 0.6940509915014165,
+            "recall": 0.9645669291338582,
+            "specificity": 0.47317073170731705,
+            "f1": 0.8072487644151565,
+            "roc_auc": 0.8366909928941809,
+            "brier": 0.20199881317409163,
+            "confusion_matrix": {
+              "tn": 194,
+              "fp": 216,
+              "fn": 18,
+              "tp": 490
+            },
+            "threshold": 0.5
+          }
+        }
+      ]
+    },
+    {
+      "algorithm": "knn",
+      "label": "K-Nearest Neighbors (k=15)",
+      "internal": {
+        "n": 200,
+        "positives": 116,
+        "accuracy": 0.925,
+        "precision": 0.9391304347826087,
+        "recall": 0.9310344827586207,
+        "specificity": 0.9166666666666666,
+        "f1": 0.935064935064935,
+        "roc_auc": 0.9858374384236452,
+        "brier": 0.05102222222222222,
+        "confusion_matrix": {
+          "tn": 77,
+          "fp": 7,
+          "fn": 8,
+          "tp": 108
+        },
+        "threshold": 0.5
+      },
+      "external": [
+        {
+          "name": "Heart_Disease x2.xlsx",
+          "metrics": {
+            "n": 918,
+            "positives": 508,
+            "accuracy": 0.7145969498910676,
+            "precision": 0.6863636363636364,
+            "recall": 0.8917322834645669,
+            "specificity": 0.4951219512195122,
+            "f1": 0.7756849315068494,
+            "roc_auc": 0.7828356059151143,
+            "brier": 0.19643669813604453,
+            "confusion_matrix": {
+              "tn": 203,
+              "fp": 207,
+              "fn": 55,
+              "tp": 453
+            },
+            "threshold": 0.5
+          }
+        }
+      ]
+    },
+    {
+      "algorithm": "neural_network",
+      "label": "Neural Network (MLP)",
+      "internal": {
+        "n": 200,
+        "positives": 116,
+        "accuracy": 0.975,
+        "precision": 0.9743589743589743,
+        "recall": 0.9827586206896551,
+        "specificity": 0.9642857142857143,
+        "f1": 0.9785407725321889,
+        "roc_auc": 0.9978448275862069,
+        "brier": 0.020795651934582063,
+        "confusion_matrix": {
+          "tn": 81,
+          "fp": 3,
+          "fn": 2,
+          "tp": 114
+        },
+        "threshold": 0.5
+      },
+      "external": [
+        {
+          "name": "Heart_Disease x2.xlsx",
+          "metrics": {
+            "n": 918,
+            "positives": 508,
+            "accuracy": 0.7723311546840959,
+            "precision": 0.7275494672754946,
+            "recall": 0.9409448818897638,
+            "specificity": 0.5634146341463414,
+            "f1": 0.8206008583690987,
+            "roc_auc": 0.8655535817169195,
+            "brier": 0.20755275585179328,
+            "confusion_matrix": {
+              "tn": 231,
+              "fp": 179,
+              "fn": 30,
+              "tp": 478
+            },
+            "threshold": 0.5
+          }
+        }
+      ]
+    },
+    {
+      "algorithm": "gradient_boosting",
+      "label": "Gradient Boosting",
+      "internal": {
+        "n": 200,
+        "positives": 116,
+        "accuracy": 0.995,
+        "precision": 0.9914529914529915,
+        "recall": 1.0,
+        "specificity": 0.9880952380952381,
+        "f1": 0.9957081545064378,
+        "roc_auc": 0.9991789819376027,
+        "brier": 0.007858360609042991,
+        "confusion_matrix": {
+          "tn": 83,
+          "fp": 1,
+          "fn": 0,
+          "tp": 116
+        },
+        "threshold": 0.5
+      },
+      "external": [
+        {
+          "name": "Heart_Disease x2.xlsx",
+          "metrics": {
+            "n": 918,
+            "positives": 508,
+            "accuracy": 0.7309368191721133,
+            "precision": 0.6861626248216833,
+            "recall": 0.9468503937007874,
+            "specificity": 0.4634146341463415,
+            "f1": 0.7956989247311828,
+            "roc_auc": 0.8182038601882081,
+            "brier": 0.20912508956079795,
+            "confusion_matrix": {
+              "tn": 190,
+              "fp": 220,
+              "fn": 27,
+              "tp": 481
+            },
+            "threshold": 0.5
+          }
+        }
+      ]
+    },
+    {
+      "algorithm": "random_forest",
+      "label": "Random Forest (selected)",
+      "internal": {
+        "n": 200,
+        "positives": 116,
+        "accuracy": 0.99,
+        "precision": 0.9913793103448276,
+        "recall": 0.9913793103448276,
+        "specificity": 0.9880952380952381,
+        "f1": 0.9913793103448276,
+        "roc_auc": 0.9992816091954023,
+        "brier": 0.014257177709568606,
+        "confusion_matrix": {
+          "tn": 83,
+          "fp": 1,
+          "fn": 1,
+          "tp": 115
+        },
+        "threshold": 0.5
+      },
+      "external": [
+        {
+          "name": "Heart_Disease x2.xlsx",
+          "metrics": {
+            "n": 918,
+            "positives": 508,
+            "accuracy": 0.7799564270152506,
+            "precision": 0.7420886075949367,
+            "recall": 0.9232283464566929,
+            "specificity": 0.6024390243902439,
+            "f1": 0.8228070175438597,
+            "roc_auc": 0.8251800460917995,
+            "brier": 0.1752740353663245,
+            "confusion_matrix": {
+              "tn": 247,
+              "fp": 163,
+              "fn": 39,
+              "tp": 469
+            },
+            "threshold": 0.5
+          }
+        }
+      ]
+    }
+  ],
+  "parity_fixtures": [
+    {
+      "input": {
+        "age": 20.0,
+        "sex": 0.0,
+        "resting_bp": 143.0,
+        "max_heart_rate": 113.0,
+        "cholesterol": 432.0,
+        "fasting_blood_sugar": 0.0,
+        "chest_pain_type": 1.0,
+        "exercise_angina": 0.0,
+        "resting_ecg": 1.0,
+        "oldpeak": 1.7999999523162842,
+        "slope": 1.0
+      },
+      "probability": 0.19504697620868683
+    },
+    {
+      "input": {
+        "age": 67.0,
+        "sex": 1.0,
+        "resting_bp": 127.0,
+        "max_heart_rate": 86.0,
+        "cholesterol": 139.0,
+        "fasting_blood_sugar": 0.0,
+        "chest_pain_type": 1.0,
+        "exercise_angina": 1.0,
+        "resting_ecg": 0.0,
+        "oldpeak": 3.5999999046325684,
+        "slope": 1.0
+      },
+      "probability": 0.005414596758782864
+    },
+    {
+      "input": {
+        "age": 76.0,
+        "sex": 1.0,
+        "resting_bp": 138.0,
+        "max_heart_rate": 174.0,
+        "cholesterol": 237.0,
+        "fasting_blood_sugar": 1.0,
+        "chest_pain_type": 2.0,
+        "exercise_angina": 1.0,
+        "resting_ecg": 0.0,
+        "oldpeak": 2.9000000953674316,
+        "slope": 3.0
+      },
+      "probability": 0.950660765171051
+    },
+    {
+      "input": {
+        "age": 50.0,
+        "sex": 1.0,
+        "resting_bp": 147.0,
+        "max_heart_rate": 174.0,
+        "cholesterol": 223.0,
+        "fasting_blood_sugar": 1.0,
+        "chest_pain_type": 0.0,
+        "exercise_angina": 0.0,
+        "resting_ecg": 2.0,
+        "oldpeak": 1.2999999523162842,
+        "slope": 3.0
+      },
+      "probability": 0.9749992489814758
+    },
+    {
+      "input": {
+        "age": 65.0,
+        "sex": 1.0,
+        "resting_bp": 125.0,
+        "max_heart_rate": 93.0,
+        "cholesterol": 346.0,
+        "fasting_blood_sugar": 0.0,
+        "chest_pain_type": 0.0,
+        "exercise_angina": 1.0,
+        "resting_ecg": 1.0,
+        "oldpeak": 3.9000000953674316,
+        "slope": 0.0
+      },
+      "probability": 0.0035389913246035576
+    },
+    {
+      "input": {
+        "age": 56.0,
+        "sex": 1.0,
+        "resting_bp": 133.0,
+        "max_heart_rate": 79.0,
+        "cholesterol": 268.0,
+        "fasting_blood_sugar": 1.0,
+        "chest_pain_type": 0.0,
+        "exercise_angina": 0.0,
+        "resting_ecg": 0.0,
+        "oldpeak": 5.300000190734863,
+        "slope": 1.0
+      },
+      "probability": 0.001534090843051672
+    },
+    {
+      "input": {
+        "age": 40.0,
+        "sex": 1.0,
+        "resting_bp": 140.0,
+        "max_heart_rate": 172.0,
+        "cholesterol": 289.0,
+        "fasting_blood_sugar": 0.0,
+        "chest_pain_type": 1.0,
+        "exercise_angina": 0.0,
+        "resting_ecg": 0.0,
+        "oldpeak": 0.0,
+        "slope": 1.0
+      },
+      "probability": 0.14149294793605804
+    },
+    {
+      "input": {
+        "age": 49.0,
+        "sex": 0.0,
+        "resting_bp": 160.0,
+        "max_heart_rate": 156.0,
+        "cholesterol": 180.0,
+        "fasting_blood_sugar": 0.0,
+        "chest_pain_type": 2.0,
+        "exercise_angina": 0.0,
+        "resting_ecg": 0.0,
+        "oldpeak": 1.0,
+        "slope": 2.0
+      },
+      "probability": 0.9260464310646057
+    },
+    {
+      "input": {
+        "age": 37.0,
+        "sex": 1.0,
+        "resting_bp": 130.0,
+        "max_heart_rate": 98.0,
+        "cholesterol": 283.0,
+        "fasting_blood_sugar": 0.0,
+        "chest_pain_type": 1.0,
+        "exercise_angina": 0.0,
+        "resting_ecg": 1.0,
+        "oldpeak": 0.0,
+        "slope": 1.0
+      },
+      "probability": 0.08402571827173233
+    },
+    {
+      "input": {
+        "age": 65.0,
+        "sex": 1.0,
+        "resting_bp": 115.0,
+        "max_heart_rate": 93.0,
+        "cholesterol": null,
+        "fasting_blood_sugar": 0.0,
+        "chest_pain_type": 3.0,
+        "exercise_angina": 1.0,
+        "resting_ecg": 0.0,
+        "oldpeak": 0.0,
+        "slope": 2.0
+      },
+      "probability": 0.7594414353370667
+    },
+    {
+      "input": {
+        "age": 32.0,
+        "sex": 1.0,
+        "resting_bp": 95.0,
+        "max_heart_rate": 127.0,
+        "cholesterol": null,
+        "fasting_blood_sugar": 1.0,
+        "chest_pain_type": 0.0,
+        "exercise_angina": 0.0,
+        "resting_ecg": 0.0,
+        "oldpeak": 0.699999988079071,
+        "slope": 1.0
+      },
+      "probability": 0.07588329911231995
+    },
+    {
+      "input": {
+        "age": 61.0,
+        "sex": 1.0,
+        "resting_bp": 105.0,
+        "max_heart_rate": 110.0,
+        "cholesterol": null,
+        "fasting_blood_sugar": 1.0,
+        "chest_pain_type": 3.0,
+        "exercise_angina": 1.0,
+        "resting_ecg": 0.0,
+        "oldpeak": 1.5,
+        "slope": 1.0
+      },
+      "probability": 0.5300061702728271
+    }
+  ],
+  "duration_seconds": 288.1
+}

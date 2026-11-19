@@ -1,129 +1,274 @@
 /**
- * MongoDB Schemas
- * ===============
- * Three collections:
- *   1. predictions      – every inference request + result
- *   2. trainingSessions – retrain jobs (upload → train → complete/fail)
- *   3. modelMetrics     – latest evaluation metrics per model
+ * db/schema.js  –  PostgreSQL (Neon) schema, defined with Drizzle ORM
+ * ====================================================================
+ * Auth (managed by Better Auth – see src/auth/auth.js)
+ *   users, sessions, accounts, verifications
+ *
+ * Domain
+ *   patients        – identified only by the hospital folder number (data minimisation)
+ *   model_versions  – every trained Random Forest (candidate → active → retired)
+ *   training_jobs   – admin retraining runs (dataset upload → Python → candidate)
+ *   assessments     – one prediction for one patient by one user with one model version
+ *   audit_logs      – who did what, when (logins, predictions, admin actions …)
+ *
+ * After changing this file:
+ *   npm run db:generate -- --name <change>   then   npm run db:migrate
  */
 
-import mongoose from "mongoose";
+import {
+  pgTable,
+  pgEnum,
+  uuid,
+  bigserial,
+  text,
+  boolean,
+  integer,
+  smallint,
+  doublePrecision,
+  jsonb,
+  timestamp,
+  index,
+  uniqueIndex,
+  check,
+} from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
-const { Schema, model } = mongoose;
+const tz = (name) => timestamp(name, { withTimezone: true });
+const createdAt = () => tz("created_at").notNull().defaultNow();
+const updatedAt = () =>
+  tz("updated_at")
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date());
 
 /* ============================================================
- * 1. PREDICTION
+ * AUTH  (column set required by Better Auth + admin plugin)
  * ============================================================ */
-const predictionSchema = new Schema(
+export const users = pgTable("users", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  email: text("email").notNull().unique(),
+  emailVerified: boolean("email_verified").notNull().default(false),
+  image: text("image"),
+  // admin plugin
+  role: text("role").notNull().default("clinician"), // "admin" | "clinician"
+  banned: boolean("banned").default(false),
+  banReason: text("ban_reason"),
+  banExpires: tz("ban_expires"),
+  // application
+  mustChangePassword: boolean("must_change_password").notNull().default(false),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+export const sessions = pgTable(
+  "sessions",
   {
-    // Which model(s) were used
-    modelName: { type: String, required: true, index: true },
-
-    // Raw input features as submitted by the client
-    inputFeatures: {
-      type: Map,
-      of: Number,
-      required: true,
-    },
-
-    // Scaled feature vector actually fed to the model
-    scaledFeatures: [Number],
-
-    // Output
-    prediction: { type: Number, enum: [0, 1], required: true },
-    probability: { type: Number, min: 0, max: 1, required: true },
-    label: {
-      type: String,
-      enum: ["Heart Disease Likely", "Heart Disease Unlikely"],
-    },
-
-    // Optional – compare endpoint stores all model results here
-    allModelResults: { type: Schema.Types.Mixed, default: null },
-
-    // Request metadata
-    requestIp: String,
-    userAgent: String,
+    id: text("id").primaryKey(),
+    token: text("token").notNull().unique(),
+    expiresAt: tz("expires_at").notNull(),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    impersonatedBy: text("impersonated_by"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
+  (t) => [index("sessions_user_id_idx").on(t.userId)],
+);
+
+export const accounts = pgTable(
+  "accounts",
   {
-    timestamps: true, // createdAt, updatedAt
-    collection: "predictions",
+    id: text("id").primaryKey(),
+    accountId: text("account_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accessToken: text("access_token"),
+    refreshToken: text("refresh_token"),
+    idToken: text("id_token"),
+    accessTokenExpiresAt: tz("access_token_expires_at"),
+    refreshTokenExpiresAt: tz("refresh_token_expires_at"),
+    scope: text("scope"),
+    password: text("password"), // scrypt hash, never plain text
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
+  (t) => [index("accounts_user_id_idx").on(t.userId)],
+);
+
+export const verifications = pgTable("verifications", {
+  id: text("id").primaryKey(),
+  identifier: text("identifier").notNull(),
+  value: text("value").notNull(),
+  expiresAt: tz("expires_at").notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/* ============================================================
+ * ENUMS
+ * ============================================================ */
+export const modelStatusEnum = pgEnum("model_status", [
+  "candidate",
+  "active",
+  "retired",
+]);
+export const jobStatusEnum = pgEnum("job_status", [
+  "queued",
+  "running",
+  "completed",
+  "failed",
+]);
+export const riskBandEnum = pgEnum("risk_band", ["low", "moderate", "high"]);
+
+/* ============================================================
+ * PATIENTS
+ * ============================================================ */
+export const patients = pgTable("patients", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  hospitalNumber: text("hospital_number").notNull().unique(),
+  createdById: text("created_by_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/* ============================================================
+ * MODEL VERSIONS
+ * ============================================================ */
+export const modelVersions = pgTable(
+  "model_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    version: text("version").notNull().unique(), // "rf-v1", "rf-20261120-101500"
+    algorithm: text("algorithm").notNull().default("random_forest"),
+    status: modelStatusEnum("status").notNull().default("candidate"),
+    artifactDir: text("artifact_dir").notNull(), // relative to MODEL_STORE_DIR
+    manifest: jsonb("manifest").notNull(), // full training/evaluation manifest
+    trainingJobId: uuid("training_job_id"),
+    createdById: text("created_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    activatedAt: tz("activated_at"),
+    activatedById: text("activated_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    // At most one active model at any time
+    uniqueIndex("model_versions_single_active_uq")
+      .on(t.status)
+      .where(sql`${t.status} = 'active'`),
+  ],
 );
 
 /* ============================================================
- * 2. TRAINING SESSION
+ * TRAINING JOBS
  * ============================================================ */
-const trainingSessionSchema = new Schema(
+export const trainingJobs = pgTable(
+  "training_jobs",
   {
-    sessionId: { type: String, required: true, unique: true, index: true },
-    modelType: { type: String, required: true }, // "knn" | "all" | …
-    status: {
-      type: String,
-      enum: ["pending", "training", "completed", "failed"],
-      default: "pending",
-      index: true,
-    },
-
-    // Dataset info
-    originalFilename: String,
-    fileSizeBytes: Number,
-    numSamples: Number,
-    numFeatures: Number,
-    featureNames: [String],
-
-    // Progress tracking
-    progress: { type: Number, default: 0, min: 0, max: 100 },
-    currentMessage: { type: String, default: "" },
-    currentModel: String, // used when modelType === "all"
-
-    // Results
-    metrics: { type: Schema.Types.Mixed, default: null }, // single model
-    results: { type: Schema.Types.Mixed, default: {} }, // all-models map
-
-    // Timing
-    startTime: { type: Date, default: Date.now },
-    endTime: Date,
-
-    // Error info
-    error: String,
+    id: uuid("id").primaryKey().defaultRandom(),
+    status: jobStatusEnum("status").notNull().default("queued"),
+    progress: integer("progress").notNull().default(0),
+    message: text("message").notNull().default(""),
+    searchMode: text("search_mode").notNull().default("full"),
+    datasetFilename: text("dataset_filename").notNull(),
+    datasetSizeBytes: integer("dataset_size_bytes"),
+    modelVersionId: uuid("model_version_id").references(() => modelVersions.id, {
+      onDelete: "set null",
+    }),
+    result: jsonb("result"),
+    error: text("error"),
+    startedById: text("started_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    startedAt: tz("started_at"),
+    finishedAt: tz("finished_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
-  {
-    timestamps: true,
-    collection: "trainingSessions",
-  },
+  (t) => [
+    index("training_jobs_status_idx").on(t.status),
+    check(
+      "training_jobs_progress_check",
+      sql`${t.progress} >= 0 AND ${t.progress} <= 100`,
+    ),
+  ],
 );
 
 /* ============================================================
- * 3. MODEL METRICS  (upserted after every training run)
+ * ASSESSMENTS
  * ============================================================ */
-const modelMetricsSchema = new Schema(
+export const assessments = pgTable(
+  "assessments",
   {
-    modelName: { type: String, required: true, unique: true, index: true },
-    source: {
-      type: String,
-      enum: ["initial", "retrained"],
-      default: "initial",
-    },
+    id: uuid("id").primaryKey().defaultRandom(),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patients.id, { onDelete: "restrict" }),
+    userId: text("user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    modelVersionId: uuid("model_version_id")
+      .notNull()
+      .references(() => modelVersions.id, { onDelete: "restrict" }),
 
-    accuracy: Number,
-    precision: Number,
-    recall: Number,
-    f1: Number,
-    f1_score: Number, // retrain.py uses f1_score key
-    auc: Number,
-    auc_roc: Number, // retrain.py uses auc_roc key
-    cv_mean: Number,
-    cv_std: Number,
-    confusion_matrix: [[Number]],
+    inputFeatures: jsonb("input_features").notNull(), // { feature: value | null }
+    imputedFeatures: text("imputed_features").array().notNull().default([]),
+    warnings: jsonb("warnings").notNull().default([]), // outside training range, …
+    explanation: jsonb("explanation"), // per-feature sensitivity
 
-    trainedAt: { type: Date, default: Date.now },
+    prediction: smallint("prediction").notNull(), // 1 = CVD likely
+    probability: doublePrecision("probability").notNull(),
+    riskBand: riskBandEnum("risk_band").notNull(),
+
+    clinicianNote: text("clinician_note"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
-  {
-    timestamps: true,
-    collection: "modelMetrics",
-  },
+  (t) => [
+    index("assessments_patient_idx").on(t.patientId),
+    index("assessments_user_idx").on(t.userId),
+    index("assessments_created_at_idx").on(t.createdAt),
+    check("assessments_prediction_check", sql`${t.prediction} IN (0, 1)`),
+    check(
+      "assessments_probability_check",
+      sql`${t.probability} >= 0 AND ${t.probability} <= 1`,
+    ),
+  ],
 );
 
-export const Prediction = model("Prediction", predictionSchema);
-export const TrainingSession = model("TrainingSession", trainingSessionSchema);
-export const ModelMetrics = model("ModelMetrics", modelMetricsSchema);
+/* ============================================================
+ * AUDIT LOG
+ * ============================================================ */
+export const auditLogs = pgTable(
+  "audit_logs",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    userId: text("user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    actorEmail: text("actor_email"),
+    action: text("action").notNull(), // "auth.login", "assessment.create", …
+    entityType: text("entity_type"),
+    entityId: text("entity_id"),
+    details: jsonb("details"),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("audit_logs_created_at_idx").on(t.createdAt),
+    index("audit_logs_user_idx").on(t.userId),
+    index("audit_logs_action_idx").on(t.action),
+  ],
+);

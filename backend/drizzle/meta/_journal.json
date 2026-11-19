@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1795101145998,
+      "tag": "0000_easy_leopardon",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1795101495240,
+      "tag": "0001_init_cvd_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795101512786,
+      "tag": "0002_drop_demo_users",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795103814920,
+      "tag": "0003_auth_and_clinical_domain",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795103822903,
+      "tag": "0004_drop_legacy_tables",
+      "breakpoints": true
+    }
+  ]
+}
