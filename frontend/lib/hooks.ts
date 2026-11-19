@@ -12,10 +12,11 @@ export function useMe() {
   });
 }
 
-export function useActiveModel() {
+export function useActiveModel(enabled = true) {
   return useQuery({
     queryKey: ["model", "active"],
     queryFn: () => api<{ model: ActiveModel }>("/model/active").then((r) => r.model),
     staleTime: 5 * 60_000,
+    enabled,
   });
 }

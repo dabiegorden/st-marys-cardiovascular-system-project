@@ -10,6 +10,7 @@
  *   training_jobs   – admin retraining runs (dataset upload → Python → candidate)
  *   assessments     – one prediction for one patient by one user with one model version
  *   audit_logs      – who did what, when (logins, predictions, admin actions …)
+ *   email_notifications – outbox of alert / digest emails sent through Resend
  *
  * After changing this file:
  *   npm run db:generate -- --name <change>   then   npm run db:migrate
@@ -57,6 +58,7 @@ export const users = pgTable("users", {
   banExpires: tz("ban_expires"),
   // application
   mustChangePassword: boolean("must_change_password").notNull().default(false),
+  highRiskAlerts: boolean("high_risk_alerts").notNull().default(true), // email preference
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -270,5 +272,46 @@ export const auditLogs = pgTable(
     index("audit_logs_created_at_idx").on(t.createdAt),
     index("audit_logs_user_idx").on(t.userId),
     index("audit_logs_action_idx").on(t.action),
+  ],
+);
+
+/* ============================================================
+ * EMAIL NOTIFICATIONS (transactional outbox)
+ * One row per recipient per event. The rendered email is stored so every
+ * retry sends an identical payload (required by Resend idempotency keys).
+ * ============================================================ */
+export const notificationStatusEnum = pgEnum("notification_status", [
+  "pending",
+  "sending",
+  "sent",
+  "failed",
+  "skipped",
+]);
+
+export const emailNotifications = pgTable(
+  "email_notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: text("kind").notNull(), // "high_risk_alert" | "daily_digest" | "test"
+    dedupeKey: text("dedupe_key").notNull().unique(), // also the Resend idempotency key
+    recipientUserId: text("recipient_user_id").references(() => users.id, { onDelete: "set null" }),
+    recipientEmail: text("recipient_email").notNull(),
+    assessmentId: uuid("assessment_id").references(() => assessments.id, { onDelete: "set null" }),
+    subject: text("subject").notNull(),
+    html: text("html").notNull(),
+    text: text("text").notNull(),
+    status: notificationStatusEnum("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: tz("next_attempt_at").notNull().defaultNow(),
+    lastError: text("last_error"),
+    providerMessageId: text("provider_message_id"),
+    sentAt: tz("sent_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("email_notifications_due_idx").on(t.status, t.nextAttemptAt),
+    index("email_notifications_assessment_idx").on(t.assessmentId),
+    index("email_notifications_created_at_idx").on(t.createdAt),
   ],
 );

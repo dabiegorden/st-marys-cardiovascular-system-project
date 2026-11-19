@@ -2,12 +2,14 @@ import { config } from "./config.js";
 import { checkDatabaseConnection, closeDatabase } from "./db/db.js";
 import { initModelRegistry, getActiveModel } from "./ml/registry.js";
 import { failStaleJobs } from "./services/training.js";
+import { startNotificationJobs, stopNotificationJobs } from "./notifications/scheduler.js";
 import { createApp } from "./app.js";
 
 try {
   await checkDatabaseConnection();
   await initModelRegistry();
   await failStaleJobs();
+  startNotificationJobs();
 } catch (err) {
   console.error("❌ Startup failed:", err.message);
   await closeDatabase();
@@ -24,6 +26,7 @@ const server = createApp().listen(config.port, () => {
 
 async function shutdown(signal) {
   console.log(`\n${signal} received – shutting down…`);
+  stopNotificationJobs();
   server.close();
   await closeDatabase();
   process.exit(0);

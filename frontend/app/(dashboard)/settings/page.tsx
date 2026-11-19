@@ -1,7 +1,9 @@
 "use client";
 
 import { useTheme } from "next-themes";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { api } from "@/lib/api";
 import { useMe } from "@/lib/hooks";
 import { PageHeader } from "@/components/common";
 import { ChangePasswordForm } from "@/components/change-password-form";
@@ -12,6 +14,15 @@ import { Switch } from "@/components/ui/switch";
 export default function SettingsPage() {
   const { data: me } = useMe();
   const { theme, setTheme } = useTheme();
+  const qc = useQueryClient();
+  const prefs = useMutation({
+    mutationFn: (highRiskAlerts: boolean) => api("/me/preferences", { method: "PATCH", json: { highRiskAlerts } }),
+    onSuccess: (_r, v) => {
+      qc.invalidateQueries({ queryKey: ["me"] });
+      toast.success(v ? "High-risk email alerts switched on." : "High-risk email alerts switched off.");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not save."),
+  });
 
   return (
     <>
@@ -34,6 +45,22 @@ export default function SettingsPage() {
             <div className="flex justify-between py-1.5">
               <span className="text-muted-foreground">Role</span>
               <span className="font-medium capitalize">{me?.role}</span>
+            </div>
+            <div className="flex items-start justify-between gap-4 pt-4">
+              <div>
+                <Label htmlFor="alerts">Email me high-risk alerts</Label>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {me?.role === "admin"
+                    ? "Every high-risk result, plus a daily summary each morning."
+                    : "High-risk results from assessments you perform."}
+                </p>
+              </div>
+              <Switch
+                id="alerts"
+                checked={me?.highRiskAlerts ?? true}
+                disabled={prefs.isPending}
+                onCheckedChange={(v) => prefs.mutate(v)}
+              />
             </div>
             <div className="flex items-center justify-between pt-4">
               <Label htmlFor="dark">Dark theme</Label>

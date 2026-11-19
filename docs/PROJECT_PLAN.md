@@ -21,6 +21,7 @@
 9. [Running the system](#9-running-the-system)
 10. [Testing and verification](#10-testing-and-verification)
 11. [Operations runbook](#11-operations-runbook)
+    - [11a. Automated high-risk email alerts](#11a-automated-high-risk-email-alerts)
 12. [Limitations and open items](#12-limitations-and-open-items)
 13. [Decisions log](#13-decisions-log)
 
@@ -39,6 +40,7 @@ never as a diagnosis.
 | API | Node.js 22+, Express 5, Better Auth, zod, helmet |
 | Database | PostgreSQL on Neon, Drizzle ORM + drizzle-kit migrations |
 | Web app | Next.js 16 (App Router), React 19, Tailwind 4, shadcn/ui, TanStack Query, Recharts |
+| Notifications | Resend (email), node-cron (background jobs), transactional outbox table |
 
 **Removed** compared with the original prototype: the MongoDB layer, the CNN/CNN-LSTM models, the
 "federated learning" tab, the multi-model clinical endpoints, and the Google Gemini integration
@@ -123,6 +125,7 @@ backend/
   src/ml/registry.js       active version, activation
   src/services/training.js Python job runner
   src/services/audit.js    audit trail writer
+  src/notifications/       templates (pure) · mailer (Resend) · outbox (queue + delivery) · scheduler (node-cron)
   src/routes/clinical.js   /api/me, /model, /assessments, /patients, /stats
   src/routes/admin.js      /api/admin/* (models, training, users, audit, export)
   scripts/seed-admin.js    first administrator
@@ -310,6 +313,11 @@ assessments reference them.
 | `GET/POST /api/admin/users`, `PATCH /api/admin/users/:id`, `POST /api/admin/users/:id/reset-password` | 🛡 | User management (`{ role }`, `{ active }`) |
 | `GET /api/admin/audit-logs` | 🛡 | `page, pageSize, action, q, from, to` |
 | `GET /api/admin/assessments/export.csv` | 🛡 | Filtered CSV export (audited) |
+| `PATCH /api/me/preferences` | 👤 | `{ highRiskAlerts }` – opt in/out of alert emails |
+| `GET /api/admin/notifications` | 🛡 | Delivery log + 7-day summary + configuration + undeliverable/opted-out users |
+| `POST /api/admin/notifications/test` | 🛡 | Test email to yourself |
+| `POST /api/admin/notifications/digest` | 🛡 | Queue today's digest now |
+| `POST /api/admin/notifications/:id/retry` | 🛡 | Re-queue a failed/skipped email |
 
 Errors are `{ success: false, error, code?, errors?: [{ field, message }] }` with 400 for validation,
 401 unauthenticated, 403 forbidden / `PASSWORD_CHANGE_REQUIRED`, 404, 409 (job running / duplicate
@@ -319,9 +327,17 @@ email), and 503 (no active model).
 
 ## 8. User interface
 
-Layout: a left sidebar (the Administration section is rendered only for admins), a top bar with the
-user menu, and a footer disclaimer on every page. Light theme by default with a dark option in Settings.
-Red, amber and green are reserved for risk and always paired with a text label.
+Visual style: a lavender canvas with borderless white rounded cards and a rose brand colour. A full-width
+top bar shows the brand, the hospital name with a role tag, the active model, Settings and the account
+menu. The plain sidebar highlights the active item in the brand colour and has a collapsible
+Administration group, rendered only for admins. A footer disclaimer appears on every page. Light theme by
+default, dark option in Settings. The brand rose is kept distinct from the orange-red used for **High
+risk**. Red, amber and green are reserved for risk and always paired with a text label, and charts use a
+separate validated blue so data marks are never confused with risk.
+
+Home dashboard: a welcome banner with three role-specific gradient "step" cards (GO); **Today's data**
+(four pastel tiles with icon discs and *Yesterday / Previous 7 days* comparisons, plus four grey tiles);
+an **Operations assistant / Quick access** tile grid; trends charts; and recent assessments.
 
 | Route | Who | What |
 |---|---|---|
@@ -423,6 +439,54 @@ Scale (SUS)** session with 5–10 staff, recording task time for "new assessment
 
 ---
 
+## 11a. Automated high-risk email alerts
+
+**Goal:** when an assessment is classified **high risk**, the responsible staff are emailed
+immediately so the patient can be followed up quickly.
+
+```mermaid
+sequenceDiagram
+  participant C as Clinician
+  participant API as Express API
+  participant DB as email_notifications (outbox)
+  participant J as node-cron sweep (every minute)
+  participant R as Resend
+  C->>API: POST /api/assessments (high risk)
+  API->>DB: one row per recipient (dedupe key, rendered email)
+  API-->>C: 201 + alertRecipients
+  API->>R: immediate send (idempotency key = dedupe key)
+  R-->>API: { data.id } or { error }
+  API->>DB: sent / retry later / failed
+  J->>DB: claim due rows (FOR UPDATE SKIP LOCKED)
+  J->>R: retries with backoff, catch-up after restarts
+```
+
+| Aspect | Behaviour |
+|---|---|
+| Trigger | Assessment with `risk_band = high` |
+| Recipients | The assessing clinician + all admins (`ALERT_RECIPIENTS=assessor_and_admins`, default) or every active user (`all_staff`). Disabled users and users who switched alerts off in **Settings** are excluded |
+| Daily digest | 07:00 Africa/Accra (`DIGEST_CRON`): admins get a list of the previous 24 h of high-risk assessments; nothing is sent when there were none |
+| Delivery | Immediate attempt after the assessment is saved; the cron sweep (`OUTBOX_CRON`, every minute) retries and catches up after restarts |
+| Retries | Only 429, 5xx and network errors, after 1, 2, 5, 15, 30, 60 min (7 attempts in total, well inside Resend's 24 h idempotency window). 400/401/403/422 are permanent → `failed` |
+| No duplicates | A unique `dedupe_key` per recipient and event, also used as the Resend **idempotency key**; rows are claimed with `SKIP LOCKED`, so several API instances are safe; the stored rendered email means retries send an identical payload |
+| Address guard | `.local`, `.test`, `example.com` and similar addresses are **skipped**, not sent, to protect sender reputation; the Email alerts page lists the affected users |
+| Data protection | The email contains no clinical values; the hospital number is masked to its last 4 characters (`ALERT_SHOW_HOSPITAL_NUMBER=false`); a link opens the full record **after sign-in**. Resend is a third-party processor, so record this in the data-protection assessment (Act 843) |
+| Visibility | The admin **Email alerts** page shows configuration, 7-day counts, the delivery log and Retry; each assessment shows who was alerted and the delivery status; actions are audited (`notification.*`, `user.preferences_update`) |
+
+**Setup**
+1. Verify a sending domain in Resend; set `RESEND_API_KEY` and `RESEND_EMAIL_FROM` in `backend/.env`
+   (e.g. `"St. Mary's CVD Alerts <alerts@your-domain>"`).
+2. Make sure every staff account has a real, monitored email address (Users → ⋯ → Edit name / email).
+3. Restart the API. The log shows `✓ Background jobs: email outbox …, daily digest …`.
+4. Admin → **Email alerts** → *Send test email to me*.
+
+**Verified (2026-11-19):** a live send through the outbox to Resend's test sink `delivered@resend.dev`
+was accepted (status `sent`, Resend message id recorded); a `.local` address was skipped with a reason;
+9 unit tests cover escaping, masking, the absence of clinical values, digest capping, the address guard,
+retry classification and the backoff window.
+
+---
+
 ## 12. Limitations and open items
 
 1. **Not clinically validated.** Before clinical reliance, evaluate on de-identified Saint Mary's records
@@ -433,9 +497,12 @@ Scale (SUS)** session with 5–10 staff, recording task time for "new assessment
 5. **Exercise-test variables** (max heart rate, exercise angina, oldpeak, slope) assume a stress test was
    done. Confirm with clinicians how often these are available at the hospital.
 6. **Usability evaluation (SUS)** and a formal test-case table are still to be produced.
-7. Rate limiting uses in-memory storage, which suits a single server instance. Move it to the database if
+7. Email alerts depend on staff email addresses being correct and monitored. Resend delivery events
+   (bounces, complaints) are not yet consumed. A webhook endpoint (`email.bounced` / `email.delivered`)
+   would close that loop.
+8. Rate limiting uses in-memory storage, which suits a single server instance. Move it to the database if
    the API is scaled out.
-8. Baselines use default hyper-parameters while Random Forest was tuned. Say so in Chapter 4, or tune the
+9. Baselines use default hyper-parameters while Random Forest was tuned. Say so in Chapter 4, or tune the
    baselines too if a strict comparison is needed.
 
 ---

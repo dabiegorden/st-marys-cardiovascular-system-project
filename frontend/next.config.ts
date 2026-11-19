@@ -5,6 +5,8 @@ import type { NextConfig } from "next";
 const API_URL = process.env.API_URL ?? "http://localhost:5000";
 
 const nextConfig: NextConfig = {
+  // Keep the dev-only Next.js badge away from the sidebar profile card
+  devIndicators: { position: "bottom-right" },
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${API_URL}/api/:path*` }];
   },

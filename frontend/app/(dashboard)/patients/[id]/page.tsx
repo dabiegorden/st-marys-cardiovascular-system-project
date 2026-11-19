@@ -66,7 +66,7 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
                     ) : null
                   }
                 />
-                <Line dataKey="p" stroke="var(--primary)" strokeWidth={2} dot={{ r: 4, strokeWidth: 2, fill: "var(--card)" }} isAnimationActive={false} />
+                <Line dataKey="p" stroke="var(--series-1)" strokeWidth={2} dot={{ r: 4, strokeWidth: 2, fill: "var(--card)" }} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>

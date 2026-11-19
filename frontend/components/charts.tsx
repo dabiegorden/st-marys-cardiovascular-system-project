@@ -63,7 +63,7 @@ export function DailyAssessmentsChart({ data }: { data: { day: string; total: nu
             ) : null
           }
         />
-        <Bar dataKey="total" fill="var(--primary)" radius={[4, 4, 0, 0]} maxBarSize={28} isAnimationActive={false} />
+        <Bar dataKey="total" fill="var(--series-1)" radius={[4, 4, 0, 0]} maxBarSize={28} isAnimationActive={false} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -126,7 +126,7 @@ export function RocChart({ points, auc }: { points: { fpr: number; tpr: number }
             ) : null
           }
         />
-        <Line type="linear" dataKey="tpr" stroke="var(--primary)" strokeWidth={2} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} />
+        <Line type="linear" dataKey="tpr" stroke="var(--series-1)" strokeWidth={2} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} />
       </LineChart>
     </ResponsiveContainer>
   );
@@ -161,7 +161,7 @@ export function CalibrationChart({ points }: { points: { predicted: number; obse
             ) : null
           }
         />
-        <Line type="linear" dataKey="observed" stroke="var(--primary)" strokeWidth={2} dot={{ r: 4, strokeWidth: 2, fill: "var(--card)" }} isAnimationActive={false} />
+        <Line type="linear" dataKey="observed" stroke="var(--series-1)" strokeWidth={2} dot={{ r: 4, strokeWidth: 2, fill: "var(--card)" }} isAnimationActive={false} />
       </LineChart>
     </ResponsiveContainer>
   );
@@ -183,7 +183,7 @@ export function FeatureImportanceChart({ data }: { data: { label: string; value:
             ) : null
           }
         />
-        <Bar dataKey="value" fill="var(--primary)" radius={[0, 4, 4, 0]} maxBarSize={16} isAnimationActive={false} />
+        <Bar dataKey="value" fill="var(--series-1)" radius={[0, 4, 4, 0]} maxBarSize={16} isAnimationActive={false} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -235,7 +235,7 @@ export function ConfusionMatrix({ cm }: { cm: { tn: number; fp: number; fn: numb
   const total = cm.tn + cm.fp + cm.fn + cm.tp;
   const cell = (n: number, label: string, correct: boolean) => (
     <div
-      className={`flex flex-col items-center justify-center rounded-md border p-3 text-center ${correct ? "bg-accent" : "bg-muted/60"}`}
+      className={`flex flex-col items-center justify-center rounded-xl p-3 text-center ${correct ? "bg-tile-blue" : "bg-tile-gray"}`}
     >
       <span className="text-2xl font-semibold tabular-nums">{n}</span>
       <span className="text-xs text-muted-foreground">

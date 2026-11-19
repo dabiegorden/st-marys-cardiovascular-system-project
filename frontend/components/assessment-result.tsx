@@ -199,7 +199,7 @@ export function AssessmentResult({
 
 function MetricPair({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="rounded-md border p-3">
+    <div className="rounded-xl bg-tile-gray p-3">
       <div className="flex items-center gap-1 text-xs text-muted-foreground">
         <Info className="size-3" /> {label}
       </div>

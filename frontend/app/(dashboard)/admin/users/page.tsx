@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, KeyRound, Loader2, MoreHorizontal, UserPlus } from "lucide-react";
+import { BellOff, Copy, KeyRound, Loader2, MoreHorizontal, Pencil, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useMe } from "@/lib/hooks";
@@ -65,6 +65,7 @@ export default function UsersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState<{ name: string; email: string; role: Role }>({ name: "", email: "", role: "clinician" });
   const [temp, setTemp] = useState<{ email: string; password: string } | null>(null);
+  const [editing, setEditing] = useState<{ id: string; name: string; email: string } | null>(null);
 
   const users = useQuery({ queryKey: ["admin", "users"], queryFn: () => api<{ items: UserRow[] }>("/admin/users").then((r) => r.items) });
   const refresh = () => qc.invalidateQueries({ queryKey: ["admin", "users"] });
@@ -81,11 +82,13 @@ export default function UsersPage() {
     onError,
   });
   const update = useMutation({
-    mutationFn: ({ id, body }: { id: string; body: { role?: Role; active?: boolean } }) =>
+    mutationFn: ({ id, body }: { id: string; body: { role?: Role; active?: boolean; name?: string; email?: string } }) =>
       api(`/admin/users/${id}`, { method: "PATCH", json: body }),
     onSuccess: () => {
       toast.success("User updated.");
+      setEditing(null);
       refresh();
+      qc.invalidateQueries({ queryKey: ["me"] });
     },
     onError,
   });
@@ -133,6 +136,11 @@ export default function UsersPage() {
                   <TableRow key={u.id}>
                     <TableCell className="font-medium">
                       {u.name} {self && <span className="text-xs text-muted-foreground">(you)</span>}
+                      {!u.highRiskAlerts && (
+                        <span className="ml-2 inline-flex items-center gap-1 text-xs font-normal text-muted-foreground" title="High-risk email alerts switched off">
+                          <BellOff className="size-3" /> alerts off
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell className="text-muted-foreground">{u.email}</TableCell>
                     <TableCell>
@@ -158,6 +166,9 @@ export default function UsersPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => setEditing({ id: u.id, name: u.name, email: u.email })}>
+                            <Pencil /> Edit name / email
+                          </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => reset.mutate(u)}>
                             <KeyRound /> Reset password
                           </DropdownMenuItem>
@@ -232,6 +243,42 @@ export default function UsersPage() {
       </Dialog>
 
       <TempPasswordDialog value={temp} onClose={() => setTemp(null)} />
+
+      <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit user</DialogTitle>
+            <DialogDescription>Alerts are sent to this email address, so it must be a real, monitored mailbox.</DialogDescription>
+          </DialogHeader>
+          {editing && (
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                update.mutate({ id: editing.id, body: { name: editing.name.trim(), email: editing.email.trim() } });
+              }}
+            >
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-name">Full name</Label>
+                <Input id="edit-name" value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-email">Email</Label>
+                <Input id="edit-email" type="email" value={editing.email} onChange={(e) => setEditing({ ...editing, email: e.target.value })} />
+              </div>
+              <DialogFooter>
+                <Button
+                  type="submit"
+                  disabled={update.isPending || editing.name.trim().length < 2 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(editing.email.trim())}
+                >
+                  {update.isPending && <Loader2 className="animate-spin" />}
+                  Save
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

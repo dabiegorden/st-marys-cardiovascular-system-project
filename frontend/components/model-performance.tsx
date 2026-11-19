@@ -24,7 +24,7 @@ function MetricTiles({ m }: { m: Metrics }) {
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
       {METRICS.map(({ key, label, help }) => (
-        <div key={key} className="rounded-lg border bg-card p-3" title={help}>
+        <div key={key} className="rounded-xl bg-tile-gray p-4" title={help}>
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
             {label} <Info className="size-3" />
           </div>

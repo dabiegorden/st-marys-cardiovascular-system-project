@@ -52,6 +52,7 @@ export const auth = betterAuth({
   user: {
     additionalFields: {
       mustChangePassword: { type: "boolean", defaultValue: false, input: false },
+      highRiskAlerts: { type: "boolean", defaultValue: true, input: false },
     },
   },
 

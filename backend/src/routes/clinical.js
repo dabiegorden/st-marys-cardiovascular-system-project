@@ -2,6 +2,7 @@
  * routes/clinical.js – endpoints for every signed-in user
  * =======================================================
  *   GET    /api/me
+ *   PATCH  /api/me/preferences      { highRiskAlerts }
  *   GET    /api/model/active
  *   POST   /api/assessments
  *   GET    /api/assessments
@@ -14,10 +15,11 @@
 
 import express from "express";
 import { z } from "zod";
-import { and, count, desc, eq, gte, ilike, lte, sql, max } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, lt, lte, sql, max } from "drizzle-orm";
 
 import { db } from "../db/db.js";
-import { assessments, patients, users, modelVersions, trainingJobs } from "../db/schema.js";
+import { assessments, patients, users, modelVersions, trainingJobs, emailNotifications } from "../db/schema.js";
+import { enqueueHighRiskAlert } from "../notifications/outbox.js";
 import { asyncHandler, HttpError, parse } from "../middleware/errorHandler.js";
 import { requireAuth } from "../middleware/auth.js";
 import { getActiveModel } from "../ml/registry.js";
@@ -54,9 +56,20 @@ export function headlineMetrics(manifest) {
 
 /* ---------------- /api/me ---------------- */
 router.get("/me", requireAuth, (req, res) => {
-  const { id, name, email, role, mustChangePassword } = req.user;
-  res.json({ success: true, user: { id, name, email, role, mustChangePassword } });
+  const { id, name, email, role, mustChangePassword, highRiskAlerts } = req.user;
+  res.json({ success: true, user: { id, name, email, role, mustChangePassword, highRiskAlerts: highRiskAlerts !== false } });
 });
+
+router.patch(
+  "/me/preferences",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const body = parse(z.object({ highRiskAlerts: z.boolean() }), req.body);
+    await db.update(users).set({ highRiskAlerts: body.highRiskAlerts }).where(eq(users.id, req.user.id));
+    await audit(req, "user.preferences_update", { entityType: "user", entityId: req.user.id, details: body });
+    res.json({ success: true, preferences: body });
+  }),
+);
 
 /* ---------------- /api/model/active ---------------- */
 router.get("/model/active", requireAuth, (req, res) => {
@@ -146,9 +159,25 @@ router.post(
       details: { patientId: patient.id, modelVersion: active.row.version, riskBand: row.riskBand },
     });
 
+    // High-risk → queue email alerts (delivered in the background via Resend)
+    let alertRecipients = 0;
+    if (row.riskBand === "high") {
+      try {
+        alertRecipients = await enqueueHighRiskAlert({
+          assessment: row,
+          hospitalNumber: patient.hospitalNumber,
+          assessor: req.user,
+          modelVersion: active.row.version,
+        });
+      } catch (err) {
+        console.error("[email] Could not queue high-risk alert:", err.message);
+      }
+    }
+
     res.status(201).json({
       success: true,
       assessment: { ...row, hospitalNumber: patient.hospitalNumber, modelVersion: active.row.version },
+      alertRecipients,
     });
   }),
 );
@@ -237,6 +266,20 @@ router.get(
 
     await audit(req, "assessment.view", { entityType: "assessment", entityId: id });
 
+    const alerts = await db
+      .select({
+        id: emailNotifications.id,
+        recipientName: users.name,
+        recipientEmail: emailNotifications.recipientEmail,
+        status: emailNotifications.status,
+        sentAt: emailNotifications.sentAt,
+        createdAt: emailNotifications.createdAt,
+      })
+      .from(emailNotifications)
+      .leftJoin(users, eq(emailNotifications.recipientUserId, users.id))
+      .where(and(eq(emailNotifications.assessmentId, id), eq(emailNotifications.kind, "high_risk_alert")))
+      .orderBy(emailNotifications.createdAt);
+
     const m = row.manifest;
     res.json({
       success: true,
@@ -256,6 +299,7 @@ router.get(
         metrics: headlineMetrics(m),
       },
       disclaimer: DISCLAIMER,
+      alerts,
     });
   }),
 );
@@ -342,16 +386,36 @@ router.get(
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const weekAgo = new Date(now.getTime() - 7 * 864e5);
     const monthAgo = new Date(now.getTime() - 30 * 864e5);
+    const startOfYesterday = new Date(startOfDay.getTime() - 864e5);
+    const twoWeeksAgo = new Date(now.getTime() - 14 * 864e5);
     const mine = eq(assessments.userId, req.user.id);
-    const cnt = async (...conds) =>
-      (await db.select({ c: count() }).from(assessments).where(conds.length ? and(...conds) : undefined))[0].c;
-
-    const personal = {
-      today: await cnt(mine, gte(assessments.createdAt, startOfDay)),
-      week: await cnt(mine, gte(assessments.createdAt, weekAgo)),
-      highRiskWeek: await cnt(mine, gte(assessments.createdAt, weekAgo), eq(assessments.riskBand, "high")),
-      total: await cnt(mine),
+    // Counts for "this period vs previous period" comparisons, in one query per scope
+    const f = (cond) => sql`count(*) filter (where ${cond})`.mapWith(Number);
+    const at = assessments.createdAt;
+    const windowCounts = async (scope) => {
+      const [r] = await db
+        .select({
+          today: f(gte(at, startOfDay)),
+          yesterday: f(and(gte(at, startOfYesterday), lt(at, startOfDay))),
+          week: f(gte(at, weekAgo)),
+          prevWeek: f(and(gte(at, twoWeeksAgo), lt(at, weekAgo))),
+          highRiskWeek: f(and(gte(at, weekAgo), eq(assessments.riskBand, "high"))),
+          highRiskPrevWeek: f(and(gte(at, twoWeeksAgo), lt(at, weekAgo), eq(assessments.riskBand, "high"))),
+          total: count(),
+        })
+        .from(assessments)
+        .where(scope);
+      return r;
     };
+
+    const personal = await windowCounts(mine);
+    const [patientCounts] = await db
+      .select({
+        total: count(),
+        newWeek: sql`count(*) filter (where ${patients.createdAt} >= ${weekAgo})`.mapWith(Number),
+        newPrevWeek: sql`count(*) filter (where ${patients.createdAt} >= ${twoWeeksAgo} and ${patients.createdAt} < ${weekAgo})`.mapWith(Number),
+      })
+      .from(patients);
 
     const day = sql`date_trunc('day', ${assessments.createdAt})`;
     const daily = await db
@@ -373,9 +437,10 @@ router.get(
     const out = {
       personal,
       overall: {
-        total: await cnt(),
-        week: await cnt(gte(assessments.createdAt, weekAgo)),
-        patients: (await db.select({ c: count() }).from(patients))[0].c,
+        ...(await windowCounts(undefined)),
+        patients: patientCounts.total,
+        newPatientsWeek: patientCounts.newWeek,
+        newPatientsPrevWeek: patientCounts.newPrevWeek,
         riskDistribution,
         daily,
       },

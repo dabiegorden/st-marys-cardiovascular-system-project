@@ -28,6 +28,17 @@ const schema = z.object({
     .default(path.join(repoRoot, "model_training", "Heart_Disease x2.xlsx")),
   PYTHON_BIN: z.string().optional(),
   UPLOAD_DIR: z.string().default(path.join(backendRoot, "uploads")),
+
+  // ── Email alerts (Resend) ─────────────────────────────────────────
+  RESEND_API_KEY: z.string().optional(),
+  RESEND_EMAIL_FROM: z.string().optional(), // e.g. "St. Mary's CVD Alerts <alerts@your-domain>"
+  // Who receives a high-risk alert: the assessing clinician + all admins, or every active user
+  ALERT_RECIPIENTS: z.enum(["assessor_and_admins", "all_staff"]).default("assessor_and_admins"),
+  // Emails leave the hospital via Resend – the hospital number is masked unless explicitly enabled
+  ALERT_SHOW_HOSPITAL_NUMBER: z.enum(["true", "false"]).default("false"),
+  OUTBOX_CRON: z.string().default("* * * * *"), // retry / catch-up sweep
+  DIGEST_CRON: z.string().default("0 7 * * *"), // daily summary to admins; "off" disables
+  CRON_TIMEZONE: z.string().default("Africa/Accra"),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -55,4 +66,15 @@ export const config = {
   pythonBin: env.PYTHON_BIN,
   uploadDir: path.resolve(env.UPLOAD_DIR),
   backendRoot,
+  email: {
+    apiKey: env.RESEND_API_KEY || null,
+    from: env.RESEND_EMAIL_FROM || null,
+    enabled: Boolean(env.RESEND_API_KEY && env.RESEND_EMAIL_FROM),
+    appUrl: env.BETTER_AUTH_URL.replace(/\/$/, ""),
+    recipients: env.ALERT_RECIPIENTS,
+    showHospitalNumber: env.ALERT_SHOW_HOSPITAL_NUMBER === "true",
+    outboxCron: env.OUTBOX_CRON,
+    digestCron: env.DIGEST_CRON,
+    timezone: env.CRON_TIMEZONE,
+  },
 };

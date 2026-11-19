@@ -7,6 +7,7 @@ export interface Me {
   email: string;
   role: Role;
   mustChangePassword: boolean;
+  highRiskAlerts: boolean;
 }
 
 export interface FeatureOption {
@@ -223,7 +224,49 @@ export interface UserRow {
   role: Role;
   banned: boolean | null;
   mustChangePassword: boolean;
+  highRiskAlerts: boolean;
   createdAt: string;
+}
+
+export type NotificationStatus = "pending" | "sending" | "sent" | "failed" | "skipped";
+
+export interface AlertRecipient {
+  id: string;
+  recipientName: string | null;
+  recipientEmail: string;
+  status: NotificationStatus;
+  sentAt: string | null;
+  createdAt: string;
+}
+
+export interface NotificationRow {
+  id: string;
+  kind: "high_risk_alert" | "daily_digest" | "test";
+  status: NotificationStatus;
+  recipientEmail: string;
+  recipientName: string | null;
+  subject: string;
+  assessmentId: string | null;
+  attempts: number;
+  lastError: string | null;
+  nextAttemptAt: string;
+  sentAt: string | null;
+  createdAt: string;
+}
+
+export interface NotificationsResponse extends Paged<NotificationRow> {
+  summary: Partial<Record<NotificationStatus, number>>;
+  settings: {
+    enabled: boolean;
+    from: string | null;
+    recipients: "assessor_and_admins" | "all_staff";
+    showHospitalNumber: boolean;
+    outboxCron: string;
+    digestCron: string;
+    timezone: string;
+  };
+  undeliverableUsers: { id: string; name: string; email: string }[];
+  optedOutUsers: { id: string; name: string }[];
 }
 
 export interface AuditRow {

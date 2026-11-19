@@ -4,7 +4,8 @@ import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardCheck, Loader2, Printer, RotateCcw } from "lucide-react";
+import { ClipboardCheck, Loader2, MailWarning, Printer, RotateCcw } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { toast } from "sonner";
 import { api, ApiError, qs } from "@/lib/api";
 import { useActiveModel } from "@/lib/hooks";
@@ -114,6 +115,7 @@ function NewAssessment() {
   const [note, setNote] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [result, setResult] = useState<Assessment | null>(null);
+  const [alertCount, setAlertCount] = useState(0);
 
   const lookup = useQuery({
     queryKey: ["patients", "lookup", hospitalNumber.trim()],
@@ -129,9 +131,10 @@ function NewAssessment() {
   }, [model.data]);
 
   const submit = useMutation({
-    mutationFn: (body: unknown) => api<{ assessment: Assessment }>("/assessments", { method: "POST", json: body }),
-    onSuccess: ({ assessment }) => {
+    mutationFn: (body: unknown) => api<{ assessment: Assessment; alertRecipients: number }>("/assessments", { method: "POST", json: body }),
+    onSuccess: ({ assessment, alertRecipients }) => {
       setResult(assessment);
+      setAlertCount(alertRecipients ?? 0);
       qc.invalidateQueries({ queryKey: ["assessments"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
       qc.invalidateQueries({ queryKey: ["patients"] });
@@ -197,6 +200,17 @@ function NewAssessment() {
             </>
           }
         />
+        {result.riskBand === "high" && (
+          <Alert className="mb-5 border-risk-high/30 bg-risk-high-soft">
+            <MailWarning className="text-risk-high" />
+            <AlertTitle>High-risk alert</AlertTitle>
+            <AlertDescription>
+              {alertCount > 0
+                ? `An email alert has been sent to ${alertCount} staff member${alertCount === 1 ? "" : "s"} so the patient can be followed up promptly.`
+                : "No email alert was queued – check that email alerts are configured and that recipients have them switched on."}
+            </AlertDescription>
+          </Alert>
+        )}
         <AssessmentResult
           assessment={result}
           features={m.features}

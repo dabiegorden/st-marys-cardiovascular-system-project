@@ -7,7 +7,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { HeartPulse, Loader2, Printer } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { Assessment, Feature, Metrics, RiskBandDef } from "@/lib/types";
+import type { AlertRecipient, Assessment, Feature, Metrics, RiskBandDef } from "@/lib/types";
+import { NotificationStatusBadge } from "@/components/notification-status";
 import { dateTime } from "@/lib/format";
 import { ErrorState, PageHeader } from "@/components/common";
 import { PageLoading } from "@/components/app-shell";
@@ -26,6 +27,7 @@ interface Detail {
     metrics: { internal: Metrics; external: (Metrics & { name: string })[] };
   };
   disclaimer: string;
+  alerts: AlertRecipient[];
 }
 
 export default function AssessmentDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -50,7 +52,7 @@ export default function AssessmentDetailPage({ params }: { params: Promise<{ id:
 
   if (q.isLoading) return <PageLoading />;
   if (q.error || !q.data) return <ErrorState error={q.error} retry={() => q.refetch()} />;
-  const { assessment: a, model, disclaimer } = q.data;
+  const { assessment: a, model, disclaimer, alerts } = q.data;
   const currentNote = note ?? a.clinicianNote ?? "";
 
   return (
@@ -122,6 +124,30 @@ export default function AssessmentDetailPage({ params }: { params: Promise<{ id:
           )}
         </CardContent>
       </Card>
+
+      {alerts.length > 0 && (
+        <Card className="no-print mt-6">
+          <CardHeader>
+            <CardTitle className="text-base">Email alerts</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y">
+              {alerts.map((al) => (
+                <li key={al.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm">
+                  <span>
+                    <span className="font-medium">{al.recipientName ?? al.recipientEmail}</span>
+                    <span className="ml-2 text-xs text-muted-foreground">{al.recipientEmail}</span>
+                  </span>
+                  <span className="flex items-center gap-3 text-xs text-muted-foreground">
+                    {al.sentAt && dateTime(al.sentAt)}
+                    <NotificationStatusBadge status={al.status} />
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="mt-10 hidden grid-cols-2 gap-10 text-sm print:grid">
         <div className="border-t pt-2">Clinician signature</div>
