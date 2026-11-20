@@ -39,6 +39,23 @@ const schema = z.object({
   OUTBOX_CRON: z.string().default("* * * * *"), // retry / catch-up sweep
   DIGEST_CRON: z.string().default("0 7 * * *"), // daily summary to admins; "off" disables
   CRON_TIMEZONE: z.string().default("Africa/Accra"),
+
+  // ── SMS alerts (Arkesel) ──────────────────────────────────────────
+  ARKESEL_API_KEY: z.string().optional(),
+  // Approved sender ID on the Arkesel account, max 11 characters
+  ARKESEL_SENDER_ID: z.string().max(11, "ARKESEL_SENDER_ID must be at most 11 characters").optional(),
+  ARKESEL_SANDBOX: z.enum(["true", "false"]).default("false"), // true = accepted but not delivered/charged
+
+  // ── High-risk follow-up ───────────────────────────────────────────
+  ESCALATION_HOURS: z.coerce.number().positive().default(4), // escalate if not acknowledged
+  ESCALATION_CRON: z.string().default("*/15 * * * *"),
+  MAX_ESCALATIONS: z.coerce.number().int().min(1).default(3),
+
+  // ── Monitoring / usability / security ─────────────────────────────
+  DRIFT_CRON: z.string().default("0 8 * * 1"), // weekly drift check (Monday 08:00); "off" disables
+  DRIFT_WINDOW_DAYS: z.coerce.number().int().min(7).default(30),
+  SUS_PROMPT_AFTER: z.coerce.number().int().min(1).default(5), // assessments before the questionnaire
+  REQUIRE_ADMIN_2FA: z.enum(["true", "false"]).default("true"),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -77,4 +94,21 @@ export const config = {
     digestCron: env.DIGEST_CRON,
     timezone: env.CRON_TIMEZONE,
   },
+  sms: {
+    apiKey: env.ARKESEL_API_KEY || null,
+    sender: env.ARKESEL_SENDER_ID || null,
+    sandbox: env.ARKESEL_SANDBOX === "true",
+    enabled: Boolean(env.ARKESEL_API_KEY && env.ARKESEL_SENDER_ID),
+  },
+  followUp: {
+    escalationHours: env.ESCALATION_HOURS,
+    escalationCron: env.ESCALATION_CRON,
+    maxEscalations: env.MAX_ESCALATIONS,
+  },
+  monitoring: {
+    driftCron: env.DRIFT_CRON,
+    driftWindowDays: env.DRIFT_WINDOW_DAYS,
+  },
+  usability: { promptAfter: env.SUS_PROMPT_AFTER },
+  security: { requireAdmin2fa: env.REQUIRE_ADMIN_2FA === "true" },
 };

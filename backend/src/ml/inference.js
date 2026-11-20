@@ -41,6 +41,13 @@ export class LoadedModel {
     this.features = manifest.features;
     this.order = manifest.feature_order;
     this.byName = Object.fromEntries(this.features.map((f) => [f.name, f]));
+    this.setOperatingPoint();
+  }
+
+  /** Decision threshold + risk bands; defaults come from the manifest, admins may override. */
+  setOperatingPoint(threshold, bands) {
+    this.threshold = threshold ?? this.manifest.decision_threshold;
+    this.bands = bands ?? this.manifest.risk_bands;
   }
 
   get version() {
@@ -135,7 +142,7 @@ export class LoadedModel {
   }
 
   riskBand(p) {
-    const bands = this.manifest.risk_bands;
+    const bands = this.bands;
     return (bands.find((b) => p >= b.min && p < b.max) ?? bands[bands.length - 1]).name;
   }
 
@@ -182,7 +189,8 @@ export class LoadedModel {
       imputed,
       warnings,
       probability,
-      prediction: probability >= this.manifest.decision_threshold ? 1 : 0,
+      prediction: probability >= this.threshold ? 1 : 0,
+      decisionThreshold: this.threshold,
       riskBand: this.riskBand(probability),
       explanation: await this.explain(values, probability),
     };

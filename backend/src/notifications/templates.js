@@ -168,6 +168,63 @@ export function testEmail({ recipientName, appUrl }) {
   return { subject, html, text };
 }
 
+export function escalationEmail({ recipientName, assessment, hospitalNumber, assigneeName, hours, level, appUrl, timezone, showHospitalNumber }) {
+  const patientRef = maskHospitalNumber(hospitalNumber, showHospitalNumber);
+  const link = `${appUrl}/assessments/${assessment.id}`;
+  const prob = pctText(assessment.probability);
+  const subject = `ESCALATION: high-risk patient ${patientRef} not acknowledged after ${hours} h`;
+  const rowsHtml = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+${row("Patient", patientRef)}
+${row("Risk level", `High risk · ${prob}`)}
+${row("Assessed", formatTime(assessment.createdAt, timezone))}
+${row("Responsible clinician", assigneeName || "Unassigned")}
+${row("Escalation", `#${level}`)}
+</table>`;
+  const html = layout({
+    preheader: `High-risk follow-up for ${patientRef} is overdue.`,
+    heading: "High-risk follow-up overdue",
+    intro: `Hello ${escapeHtml(recipientName || "colleague")}, this high-risk case has not been acknowledged within ${escapeHtml(hours)} hours. Please make sure someone reviews the patient.`,
+    rowsHtml,
+    button: { href: link, label: "Open case" },
+    footer: `${escapeHtml(DISCLAIMER)}<br><br>Escalations go to administrators and the responsible clinician until the case is acknowledged.`,
+  });
+  const text = [
+    "HIGH-RISK FOLLOW-UP OVERDUE",
+    "",
+    `Patient ${patientRef} (${prob}) has not been acknowledged within ${hours} hours.`,
+    `Responsible clinician: ${assigneeName || "Unassigned"} · escalation #${level}`,
+    "",
+    `Open case: ${link}`,
+    DISCLAIMER,
+  ].join("\n");
+  return { subject, html, text };
+}
+
+export function driftAlertEmail({ recipientName, report, appUrl }) {
+  const drifted = report.features.filter((f) => f.level === "significant");
+  const subject = `Model monitoring: input data has shifted (${drifted.length} variable${drifted.length === 1 ? "" : "s"})`;
+  const rowsHtml = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+${drifted.map((f) => row(f.label, `PSI ${f.psi.toFixed(2)} · significant shift`)).join("\n")}
+${row("Assessments analysed", `${report.n} (last ${report.windowDays} days)`)}
+</table>`;
+  const html = layout({
+    preheader: "Recent patients differ from the training data.",
+    heading: "Data drift detected",
+    intro: `Hello ${escapeHtml(recipientName || "colleague")}, recent assessments differ noticeably from the data the active model (${escapeHtml(report.modelVersion)}) was trained on. Its accuracy may be lower than reported. Review the monitoring page and consider local validation or retraining.`,
+    rowsHtml,
+    button: { href: `${appUrl}/admin/monitoring`, label: "Open monitoring" },
+    footer: "Population stability index (PSI): below 0.10 stable, 0.10-0.25 moderate shift, above 0.25 significant shift.",
+  });
+  const text = [
+    "DATA DRIFT DETECTED",
+    "",
+    ...drifted.map((f) => `- ${f.label}: PSI ${f.psi.toFixed(2)}`),
+    `Assessments analysed: ${report.n} (last ${report.windowDays} days)`,
+    `${appUrl}/admin/monitoring`,
+  ].join("\n");
+  return { subject, html, text };
+}
+
 /* ------------------------------------------------------------------ */
 
 /** Domains that can never receive mail – sending to them only creates bounces. */

@@ -43,6 +43,13 @@
       "when": 1795129231317,
       "tag": "0005_email_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795132482420,
+      "tag": "0006_followup_outcomes_sms_sus_2fa",
+      "breakpoints": true
     }
   ]
 }

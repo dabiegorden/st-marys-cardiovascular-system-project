@@ -10,7 +10,8 @@
     "seed:admin": "node scripts/seed-admin.js",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "models:sync": "node scripts/sync-manifests.js"
   },
   "keywords": [],
   "author": "",

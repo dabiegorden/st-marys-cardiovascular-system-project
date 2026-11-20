@@ -2,7 +2,11 @@
  * routes/clinical.js – endpoints for every signed-in user
  * =======================================================
  *   GET    /api/me
- *   PATCH  /api/me/preferences      { highRiskAlerts }
+ *   PATCH  /api/me/preferences      { highRiskAlerts?, smsAlerts?, phoneNumber? }
+ *   GET    /api/me/sus  ·  POST /api/me/sus  ·  POST /api/me/sus/dismiss   usability questionnaire
+ *   PUT    /api/assessments/:id/outcome   confirmed diagnosis (local validation)
+ *   GET    /api/cases  ·  POST /api/cases/:id/actions                      high-risk follow-up
+ *   GET    /api/model/local-validation
  *   GET    /api/model/active
  *   POST   /api/assessments
  *   GET    /api/assessments
@@ -18,8 +22,14 @@ import { z } from "zod";
 import { and, count, desc, eq, gte, ilike, lt, lte, sql, max } from "drizzle-orm";
 
 import { db } from "../db/db.js";
-import { assessments, patients, users, modelVersions, trainingJobs, emailNotifications } from "../db/schema.js";
+import { assessments, patients, users, modelVersions, trainingJobs, emailNotifications, smsNotifications, susResponses, highRiskCases } from "../db/schema.js";
 import { enqueueHighRiskAlert } from "../notifications/outbox.js";
+import { enqueueHighRiskSms } from "../notifications/sms-outbox.js";
+import { normalizeGhanaPhone } from "../notifications/sms-templates.js";
+import { applyCaseAction, getCaseForAssessment, listCases, openCaseForAssessment } from "../services/cases.js";
+import { localValidation, susStatus } from "../services/insights.js";
+import { susScore } from "../ml/metrics.js";
+import { config } from "../config.js";
 import { asyncHandler, HttpError, parse } from "../middleware/errorHandler.js";
 import { requireAuth } from "../middleware/auth.js";
 import { getActiveModel } from "../ml/registry.js";
@@ -56,16 +66,48 @@ export function headlineMetrics(manifest) {
 
 /* ---------------- /api/me ---------------- */
 router.get("/me", requireAuth, (req, res) => {
-  const { id, name, email, role, mustChangePassword, highRiskAlerts } = req.user;
-  res.json({ success: true, user: { id, name, email, role, mustChangePassword, highRiskAlerts: highRiskAlerts !== false } });
+  const { id, name, email, role, mustChangePassword, highRiskAlerts, smsAlerts, phoneNumber, twoFactorEnabled } = req.user;
+  res.json({
+    success: true,
+    user: {
+      id,
+      name,
+      email,
+      role,
+      mustChangePassword,
+      highRiskAlerts: highRiskAlerts !== false,
+      smsAlerts: smsAlerts !== false,
+      phoneNumber: phoneNumber ?? null,
+      twoFactorEnabled: Boolean(twoFactorEnabled),
+      twoFactorRequired: role === "admin" && config.security.requireAdmin2fa,
+    },
+  });
 });
 
 router.patch(
   "/me/preferences",
   requireAuth,
   asyncHandler(async (req, res) => {
-    const body = parse(z.object({ highRiskAlerts: z.boolean() }), req.body);
-    await db.update(users).set({ highRiskAlerts: body.highRiskAlerts }).where(eq(users.id, req.user.id));
+    const body = parse(
+      z.object({
+        highRiskAlerts: z.boolean().optional(),
+        smsAlerts: z.boolean().optional(),
+        phoneNumber: z.string().trim().max(20).nullable().optional(),
+      }),
+      req.body,
+    );
+    const patch = {};
+    if (body.highRiskAlerts !== undefined) patch.highRiskAlerts = body.highRiskAlerts;
+    if (body.smsAlerts !== undefined) patch.smsAlerts = body.smsAlerts;
+    if (body.phoneNumber !== undefined) {
+      if (body.phoneNumber === null || body.phoneNumber === "") patch.phoneNumber = null;
+      else {
+        const phone = normalizeGhanaPhone(body.phoneNumber);
+        if (!phone) throw new HttpError(400, "Enter a valid Ghana mobile number, e.g. 024 123 4567.");
+        patch.phoneNumber = phone;
+      }
+    }
+    if (Object.keys(patch).length) await db.update(users).set(patch).where(eq(users.id, req.user.id));
     await audit(req, "user.preferences_update", { entityType: "user", entityId: req.user.id, details: body });
     res.json({ success: true, preferences: body });
   }),
@@ -86,8 +128,8 @@ router.get("/model/active", requireAuth, (req, res) => {
       activatedAt: active.row.activatedAt,
       features: m.features,
       featureStats: m.feature_stats,
-      decisionThreshold: m.decision_threshold,
-      riskBands: m.risk_bands,
+      decisionThreshold: active.model.threshold,
+      riskBands: active.model.bands,
       metrics: headlineMetrics(m),
       featureImportance: m.feature_importance.map(({ feature, label, impurity }) => ({ feature, label, importance: impurity })),
       disclaimer: DISCLAIMER,
@@ -103,11 +145,20 @@ router.get("/model/active/evaluation", requireAuth, (req, res) => {
   res.json({ success: true, model: { id: active.row.id, version: active.row.version, status: active.row.status, activatedAt: active.row.activatedAt, manifest } });
 });
 
+router.get(
+  "/model/local-validation",
+  requireAuth,
+  asyncHandler(async (_req, res) => {
+    res.json({ success: true, validation: await localValidation() });
+  }),
+);
+
 /* ---------------- assessments ---------------- */
 const createAssessmentBody = z.object({
   hospitalNumber,
   features: z.record(z.string(), z.union([z.number(), z.string(), z.null()])),
   note: z.string().trim().max(2000).optional(),
+  formDurationMs: z.number().int().min(0).max(3_600_000).optional(),
 });
 
 async function findOrCreatePatient(number, userId) {
@@ -149,6 +200,8 @@ router.post(
         prediction: result.prediction,
         probability: result.probability,
         riskBand: result.riskBand,
+        decisionThreshold: result.decisionThreshold,
+        formDurationMs: body.formDurationMs ?? null,
         clinicianNote: body.note || null,
       })
       .returning();
@@ -159,25 +212,29 @@ router.post(
       details: { patientId: patient.id, modelVersion: active.row.version, riskBand: row.riskBand },
     });
 
-    // High-risk → queue email alerts (delivered in the background via Resend)
+    // High-risk → open a follow-up case and queue email + SMS alerts (background delivery)
     let alertRecipients = 0;
+    let smsRecipients = 0;
+    let caseId = null;
     if (row.riskBand === "high") {
-      try {
-        alertRecipients = await enqueueHighRiskAlert({
-          assessment: row,
-          hospitalNumber: patient.hospitalNumber,
-          assessor: req.user,
-          modelVersion: active.row.version,
-        });
-      } catch (err) {
-        console.error("[email] Could not queue high-risk alert:", err.message);
-      }
+      const payload = { assessment: row, hospitalNumber: patient.hospitalNumber, assessor: req.user, modelVersion: active.row.version };
+      const [c, emails, sms] = await Promise.allSettled([
+        openCaseForAssessment(row, req.user.id),
+        enqueueHighRiskAlert(payload),
+        enqueueHighRiskSms(payload),
+      ]);
+      caseId = c.status === "fulfilled" ? (c.value?.id ?? null) : null;
+      alertRecipients = emails.status === "fulfilled" ? emails.value : 0;
+      smsRecipients = sms.status === "fulfilled" ? sms.value : 0;
+      for (const r of [c, emails, sms]) if (r.status === "rejected") console.error("[high-risk] follow-up error:", r.reason?.message);
     }
 
     res.status(201).json({
       success: true,
       assessment: { ...row, hospitalNumber: patient.hospitalNumber, modelVersion: active.row.version },
       alertRecipients,
+      smsRecipients,
+      caseId,
     });
   }),
 );
@@ -191,6 +248,7 @@ const listQuery = z.object({
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
   q: z.string().trim().max(40).optional(),
+  outcome: z.enum(["pending", "recorded"]).optional(),
 });
 
 export function assessmentFilters(q, user) {
@@ -201,6 +259,8 @@ export function assessmentFilters(q, user) {
   if (q.from) where.push(gte(assessments.createdAt, q.from));
   if (q.to) where.push(lte(assessments.createdAt, q.to));
   if (q.q) where.push(ilike(patients.hospitalNumber, `%${q.q}%`));
+  if (q.outcome === "pending") where.push(sql`${assessments.outcome} is null`);
+  if (q.outcome === "recorded") where.push(sql`${assessments.outcome} is not null`);
   return where.length ? and(...where) : undefined;
 }
 
@@ -215,6 +275,7 @@ export const assessmentListColumns = {
   hospitalNumber: patients.hospitalNumber,
   clinicianName: users.name,
   modelVersion: modelVersions.version,
+  outcome: assessments.outcome,
 };
 
 router.get(
@@ -279,6 +340,23 @@ router.get(
       .leftJoin(users, eq(emailNotifications.recipientUserId, users.id))
       .where(and(eq(emailNotifications.assessmentId, id), eq(emailNotifications.kind, "high_risk_alert")))
       .orderBy(emailNotifications.createdAt);
+    const smsAlerts = await db
+      .select({
+        id: smsNotifications.id,
+        recipientName: users.name,
+        recipientPhone: smsNotifications.recipientPhone,
+        status: smsNotifications.status,
+        sentAt: smsNotifications.sentAt,
+        createdAt: smsNotifications.createdAt,
+      })
+      .from(smsNotifications)
+      .leftJoin(users, eq(smsNotifications.recipientUserId, users.id))
+      .where(and(eq(smsNotifications.assessmentId, id), eq(smsNotifications.kind, "high_risk_alert")))
+      .orderBy(smsNotifications.createdAt);
+    const followUp = await getCaseForAssessment(id);
+    const [recorder] = row.assessment.outcomeRecordedById
+      ? await db.select({ name: users.name }).from(users).where(eq(users.id, row.assessment.outcomeRecordedById))
+      : [];
 
     const m = row.manifest;
     res.json({
@@ -300,6 +378,9 @@ router.get(
       },
       disclaimer: DISCLAIMER,
       alerts,
+      smsAlerts,
+      case: followUp,
+      outcomeRecordedByName: recorder?.name ?? null,
     });
   }),
 );
@@ -317,6 +398,112 @@ router.patch(
     }
     await db.update(assessments).set({ clinicianNote: note || null }).where(eq(assessments.id, id));
     await audit(req, "assessment.note_update", { entityType: "assessment", entityId: id });
+    res.json({ success: true });
+  }),
+);
+
+/* ---------------- confirmed outcome (local validation) ---------------- */
+router.put(
+  "/assessments/:id/outcome",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { id } = parse(uuidParam, req.params);
+    const body = parse(
+      z.object({
+        outcome: z.enum(["cvd_confirmed", "cvd_excluded"]).nullable(),
+        source: z.string().trim().max(120).optional(),
+        note: z.string().trim().max(2000).optional(),
+      }),
+      req.body,
+    );
+    const values = body.outcome
+      ? { outcome: body.outcome, outcomeSource: body.source || null, outcomeNote: body.note || null, outcomeRecordedAt: new Date(), outcomeRecordedById: req.user.id }
+      : { outcome: null, outcomeSource: null, outcomeNote: null, outcomeRecordedAt: null, outcomeRecordedById: null };
+    const [row] = await db.update(assessments).set(values).where(eq(assessments.id, id)).returning({ id: assessments.id });
+    if (!row) throw new HttpError(404, "Assessment not found.");
+    await audit(req, body.outcome ? "assessment.outcome_record" : "assessment.outcome_clear", {
+      entityType: "assessment",
+      entityId: id,
+      details: { outcome: body.outcome, source: body.source },
+    });
+    res.json({ success: true });
+  }),
+);
+
+/* ---------------- high-risk follow-up cases ---------------- */
+router.get(
+  "/cases",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const q = parse(
+      z.object({
+        status: z.enum(["active", "overdue", "open", "acknowledged", "reviewed", "referred", "closed"]).optional(),
+        mine: z.enum(["true", "false"]).optional(),
+        page: z.coerce.number().int().min(1).default(1),
+        pageSize: z.coerce.number().int().min(1).max(100).default(20),
+      }),
+      req.query,
+    );
+    res.json({ success: true, ...(await listCases({ ...q, mine: q.mine === "true", userId: req.user.id })) });
+  }),
+);
+
+router.post(
+  "/cases/:id/actions",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { id } = parse(uuidParam, req.params);
+    const body = parse(
+      z.object({
+        action: z.enum(["acknowledge", "review", "refer", "close", "reopen", "note"]),
+        note: z.string().trim().max(2000).optional(),
+      }),
+      req.body,
+    );
+    const updated = await applyCaseAction(id, body.action, req.user, body.note);
+    await audit(req, `case.${body.action}`, { entityType: "high_risk_case", entityId: id, details: { status: updated.status } });
+    res.json({ success: true, case: updated });
+  }),
+);
+
+/* ---------------- usability questionnaire (SUS) ---------------- */
+router.get(
+  "/me/sus",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    res.json({ success: true, sus: await susStatus(req.user) });
+  }),
+);
+
+router.post(
+  "/me/sus",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const body = parse(
+      z.object({ answers: z.array(z.number().int().min(1).max(5)).length(10), comment: z.string().trim().max(2000).optional() }),
+      req.body,
+    );
+    const status = await susStatus(req.user);
+    if (status.completed) throw new HttpError(409, "You have already completed the questionnaire. Thank you!");
+    const score = susScore(body.answers);
+    await db.insert(susResponses).values({
+      userId: req.user.id,
+      role: req.user.role,
+      answers: body.answers,
+      score,
+      comment: body.comment || null,
+      assessmentCount: status.assessmentsDone,
+    });
+    await audit(req, "usability.sus_submitted", { details: { score } });
+    res.status(201).json({ success: true, score });
+  }),
+);
+
+router.post(
+  "/me/sus/dismiss",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    await db.update(users).set({ susDismissedAt: new Date() }).where(eq(users.id, req.user.id));
     res.json({ success: true });
   }),
 );
@@ -434,8 +621,26 @@ router.get(
       .from(assessments)
       .groupBy(assessments.riskBand);
 
+    const escalationCutoff = new Date(Date.now() - config.followUp.escalationHours * 3600_000);
+    const [followUp] = await db
+      .select({
+        open: sql`count(*) filter (where ${highRiskCases.status} = 'open')`.mapWith(Number),
+        active: sql`count(*) filter (where ${highRiskCases.status} <> 'closed')`.mapWith(Number),
+        overdue: sql`count(*) filter (where ${highRiskCases.status} = 'open' and ${highRiskCases.createdAt} < ${escalationCutoff})`.mapWith(Number),
+        mineActive: sql`count(*) filter (where ${highRiskCases.status} <> 'closed' and ${highRiskCases.assignedToId} = ${req.user.id})`.mapWith(Number),
+      })
+      .from(highRiskCases);
+    const [outcomes] = await db
+      .select({
+        recorded: sql`count(*) filter (where ${assessments.outcome} is not null)`.mapWith(Number),
+        minePending: sql`count(*) filter (where ${assessments.outcome} is null and ${assessments.userId} = ${req.user.id})`.mapWith(Number),
+      })
+      .from(assessments);
+
     const out = {
       personal,
+      followUp,
+      outcomes,
       overall: {
         ...(await windowCounts(undefined)),
         patients: patientCounts.total,

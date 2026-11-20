@@ -3,10 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   BarChart3,
+  BellRing,
+  Gauge,
+  SmilePlus,
+  Stethoscope,
   Building2,
   ChevronDown,
   ClipboardList,
@@ -25,6 +29,8 @@ import {
   Users,
 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
+import { api } from "@/lib/api";
+import { SusPrompt } from "@/components/sus-prompt";
 import { useActiveModel, useMe } from "@/lib/hooks";
 import type { Me } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -43,12 +49,13 @@ import { toast } from "sonner";
 
 const IDLE_LIMIT_MS = 30 * 60 * 1000;
 
-type NavItem = { href: string; label: string; icon: React.ElementType; exact?: boolean };
+type NavItem = { href: string; label: string; icon: React.ElementType; exact?: boolean; badge?: number };
 
 const CLINICAL: NavItem[] = [
   { href: "/dashboard", label: "Home", icon: LayoutDashboard, exact: true },
   { href: "/assessments/new", label: "New assessment", icon: Plus, exact: true },
   { href: "/assessments", label: "Assessments", icon: ClipboardList },
+  { href: "/follow-up", label: "Follow-up", icon: Stethoscope },
   { href: "/patients", label: "Patients", icon: UserRound },
   { href: "/model", label: "Model performance", icon: BarChart3, exact: true },
 ];
@@ -57,7 +64,9 @@ const ADMIN: NavItem[] = [
   { href: "/admin/models", label: "Model versions", icon: Layers },
   { href: "/admin/training", label: "Retraining", icon: RefreshCcw },
   { href: "/admin/users", label: "Users", icon: Users },
-  { href: "/admin/notifications", label: "Email alerts", icon: Mail },
+  { href: "/admin/notifications", label: "Alerts (email & SMS)", icon: Mail },
+  { href: "/admin/monitoring", label: "Monitoring", icon: Gauge },
+  { href: "/admin/usability", label: "Usability study", icon: SmilePlus },
   { href: "/admin/audit", label: "Audit log", icon: FileClock },
 ];
 
@@ -95,6 +104,11 @@ function NavLink({ item, onNavigate, inset }: { item: NavItem; onNavigate?: () =
     >
       <item.icon className={cn("size-4 shrink-0", active ? "text-primary" : "text-muted-foreground")} strokeWidth={1.75} />
       {item.label}
+      {!!item.badge && (
+        <span className="ml-auto rounded-full bg-primary px-1.5 py-px text-[10px] font-semibold text-primary-foreground tabular-nums">
+          {item.badge > 99 ? "99+" : item.badge}
+        </span>
+      )}
     </Link>
   );
 }
@@ -136,7 +150,7 @@ function HospitalCard({ role }: { role: Me["role"] }) {
   );
 }
 
-function SidebarContent({ me, onNavigate, onSignOut }: { me: Me; onNavigate?: () => void; onSignOut: () => void }) {
+function SidebarContent({ me, onNavigate, onSignOut, openCases }: { me: Me; onNavigate?: () => void; onSignOut: () => void; openCases?: number }) {
   const pathname = usePathname();
   const admin = me.role === "admin";
   const [adminOpen, setAdminOpen] = useState(true);
@@ -156,7 +170,7 @@ function SidebarContent({ me, onNavigate, onSignOut }: { me: Me; onNavigate?: ()
         <SectionLabel>Clinical</SectionLabel>
         <div className="flex flex-col gap-0.5">
           {CLINICAL.map((item) => (
-            <NavLink key={item.href} item={item} onNavigate={onNavigate} />
+            <NavLink key={item.href} item={item.href === "/follow-up" ? { ...item, badge: openCases } : item} onNavigate={onNavigate} />
           ))}
         </div>
 
@@ -214,8 +228,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const qc = useQueryClient();
   const { data: me, isLoading, error } = useMe();
-  const ready = !!me && !me.mustChangePassword;
+  const needs2fa = !!me && me.twoFactorRequired && !me.twoFactorEnabled;
+  const ready = !!me && !me.mustChangePassword && !needs2fa;
   const { data: model } = useActiveModel(ready);
+  const { data: openCases } = useQuery({
+    queryKey: ["cases", "badge"],
+    queryFn: () => api<{ counts: Record<string, number> }>("/cases?status=open&pageSize=1").then((r) => r.counts.open ?? 0),
+    enabled: ready,
+    refetchInterval: 60_000,
+  });
   const [mobileOpen, setMobileOpen] = useState(false);
   const lastActivity = useRef(Date.now());
 
@@ -228,6 +249,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (me?.mustChangePassword) router.replace("/change-password");
+    else if (me && me.twoFactorRequired && !me.twoFactorEnabled) router.replace("/setup-2fa");
   }, [me, router]);
 
   // Sign out after 30 minutes without interaction
@@ -260,7 +282,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* Sidebar (desktop) */}
       <aside className="no-print hidden w-[248px] shrink-0 border-r border-sidebar-border bg-sidebar lg:block">
         <div className="sticky top-0 h-svh">
-          <SidebarContent me={me} onSignOut={() => signOut()} />
+          <SidebarContent me={me} onSignOut={() => signOut()} openCases={openCases} />
         </div>
       </aside>
 
@@ -274,7 +296,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </SheetTrigger>
             <SheetContent side="left" className="w-[272px] bg-sidebar p-0">
               <SheetTitle className="sr-only">Navigation</SheetTitle>
-              <SidebarContent me={me} onNavigate={() => setMobileOpen(false)} onSignOut={() => signOut()} />
+              <SidebarContent me={me} onNavigate={() => setMobileOpen(false)} onSignOut={() => signOut()} openCases={openCases} />
             </SheetContent>
           </Sheet>
 
@@ -284,6 +306,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <span className="hidden text-[13px] text-muted-foreground lg:block">{today}</span>
 
           <div className="ml-auto flex items-center gap-1 sm:gap-4">
+            {!!openCases && (
+              <Link
+                href="/follow-up"
+                className="hidden items-center gap-1.5 rounded-full bg-tile-pink px-3 py-1 text-[12px] font-medium text-primary hover:underline md:flex"
+              >
+                <BellRing className="size-3.5" /> {openCases} open high-risk case{openCases === 1 ? "" : "s"}
+              </Link>
+            )}
             {model && (
               <Link
                 href="/model"
@@ -327,6 +357,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main className="flex-1 px-4 pb-8 pt-2 lg:px-8">
           <div className="w-full">{children}</div>
         </main>
+        <SusPrompt />
         <footer className="no-print px-4 py-4 text-xs text-muted-foreground lg:px-8">
           Decision-support tool · not a diagnosis · not clinically validated at this hospital
         </footer>

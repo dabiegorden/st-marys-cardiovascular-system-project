@@ -46,6 +46,8 @@ interface Stats {
     riskDistribution: { riskBand: RiskBand; total: number }[];
     daily: { day: string; total: number; positive: number }[];
   };
+  followUp: { open: number; active: number; overdue: number; mineActive: number };
+  outcomes: { recorded: number; minePending: number };
   admin?: {
     users: { role: string; total: number }[];
     lastTrainingJob: { id: string; status: string; createdAt: string } | null;
@@ -187,19 +189,21 @@ type Tool = { href: string; title: string; sub: string; icon: React.ElementType;
 
 const CLINICAL_TOOLS: Tool[] = [
   { href: "/assessments/new", title: "New assessment", sub: "Enter clinical values, get a result", icon: Stethoscope, tone: "pink" },
+  { href: "/follow-up", title: "Follow-up", sub: "Acknowledge and close high-risk cases", icon: ShieldCheck, tone: "violet" },
   { href: "/assessments", title: "Assessments", sub: "Search, filter and open reports", icon: ClipboardList, tone: "blue" },
-  { href: "/patients", title: "Patients", sub: "Timeline by hospital number", icon: UserRound, tone: "violet" },
-  { href: "/model", title: "Model performance", sub: "Accuracy, sensitivity, ROC", icon: BarChart3, tone: "mint" },
+  { href: "/model", title: "Model performance", sub: "External and local validation", icon: BarChart3, tone: "mint" },
 ];
 const ADMIN_TOOLS: Tool[] = [
   { href: "/admin/models", title: "Model versions", sub: "Compare and activate models", icon: Layers, tone: "blue" },
   { href: "/admin/training", title: "Retraining", sub: "Train a candidate on new data", icon: RefreshCcw, tone: "pink" },
   { href: "/admin/users", title: "Users", sub: "Accounts, roles, passwords", icon: Users, tone: "mint" },
-  { href: "/admin/audit", title: "Audit log", sub: "Who did what, and when", icon: FileClock, tone: "violet" },
+  { href: "/admin/monitoring", title: "Monitoring", sub: "Data drift and model health", icon: FileClock, tone: "violet" },
 ];
 const OWN_TOOLS: Tool[] = [
-  { href: "/settings", title: "Settings", sub: "Password and theme", icon: Settings, tone: "violet" },
-  { href: "/model", title: "Data protection", sub: "Decision support, not diagnosis", icon: ShieldCheck, tone: "mint" },
+  { href: "/patients", title: "Patients", sub: "Timeline by hospital number", icon: UserRound, tone: "violet" },
+  { href: "/assessments", title: "Record outcomes", sub: "Confirmed diagnoses improve validation", icon: CalendarDays, tone: "mint" },
+  { href: "/settings", title: "Settings", sub: "Alerts, phone, password, 2FA", icon: Settings, tone: "pink" },
+  { href: "/model", title: "Data protection", sub: "Decision support, not diagnosis", icon: ShieldCheck, tone: "blue" },
 ];
 
 function ToolGrid({ tools }: { tools: Tool[] }) {
@@ -294,16 +298,20 @@ export default function DashboardPage() {
             />
           </div>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <PlainTile
-              label={admin ? "High-risk results (7 days)" : "My high-risk results (7 days)"}
-              value={scope.highRiskWeek}
-              sub={`Previous 7 days ${scope.highRiskPrevWeek}`}
-            />
-            <PlainTile
-              label={admin ? "All assessments" : "My assessments (all time)"}
-              value={scope.total.toLocaleString()}
-              sub={admin ? `${s.overall.patients} patients` : `Hospital-wide ${s.overall.total.toLocaleString()}`}
-            />
+            <Link href="/follow-up" className="rounded-xl transition-shadow hover:shadow-md">
+              <PlainTile
+                label="Open high-risk follow-ups"
+                value={admin ? s.followUp.active : s.followUp.mineActive}
+                sub={s.followUp.overdue ? `${s.followUp.overdue} overdue – not acknowledged` : `High-risk results (7 days) ${scope.highRiskWeek}`}
+              />
+            </Link>
+            <Link href="/assessments" className="rounded-xl transition-shadow hover:shadow-md">
+              <PlainTile
+                label="Outcomes recorded"
+                value={`${s.outcomes.recorded} / ${s.overall.total}`}
+                sub={s.outcomes.minePending ? `${s.outcomes.minePending} of mine awaiting an outcome` : "Used for local validation"}
+              />
+            </Link>
             <PlainTile
               label="CVD-likely rate (30 days)"
               value={month.total ? pct(month.positive / month.total) : "—"}

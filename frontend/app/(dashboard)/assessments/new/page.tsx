@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -116,6 +116,8 @@ function NewAssessment() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [result, setResult] = useState<Assessment | null>(null);
   const [alertCount, setAlertCount] = useState(0);
+  const [smsCount, setSmsCount] = useState(0);
+  const startedAt = useRef<number | null>(null);
 
   const lookup = useQuery({
     queryKey: ["patients", "lookup", hospitalNumber.trim()],
@@ -131,10 +133,12 @@ function NewAssessment() {
   }, [model.data]);
 
   const submit = useMutation({
-    mutationFn: (body: unknown) => api<{ assessment: Assessment; alertRecipients: number }>("/assessments", { method: "POST", json: body }),
-    onSuccess: ({ assessment, alertRecipients }) => {
+    mutationFn: (body: unknown) => api<{ assessment: Assessment; alertRecipients: number; smsRecipients: number; caseId: string | null }>("/assessments", { method: "POST", json: body }),
+    onSuccess: ({ assessment, alertRecipients, smsRecipients }) => {
       setResult(assessment);
       setAlertCount(alertRecipients ?? 0);
+      setSmsCount(smsRecipients ?? 0);
+      startedAt.current = null;
       qc.invalidateQueries({ queryKey: ["assessments"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
       qc.invalidateQueries({ queryKey: ["patients"] });
@@ -154,6 +158,10 @@ function NewAssessment() {
   if (model.error || !model.data) return <ErrorState error={model.error} retry={() => model.refetch()} />;
   const m = model.data;
 
+  const markStart = () => {
+    if (startedAt.current === null) startedAt.current = performance.now();
+  };
+
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     const errs = clientValidate(m.features, values);
@@ -167,7 +175,12 @@ function NewAssessment() {
     const features = Object.fromEntries(
       m.features.map((f) => [f.name, values[f.name] === undefined || values[f.name] === "" ? null : Number(values[f.name])]),
     );
-    submit.mutate({ hospitalNumber: hospitalNumber.trim(), features, note: note.trim() || undefined });
+    submit.mutate({
+      hospitalNumber: hospitalNumber.trim(),
+      features,
+      note: note.trim() || undefined,
+      formDurationMs: startedAt.current ? Math.round(performance.now() - startedAt.current) : undefined,
+    });
   }
 
   function reset() {
@@ -176,6 +189,7 @@ function NewAssessment() {
     setNote("");
     setErrors({});
     setHospitalNumber("");
+    startedAt.current = null;
   }
 
   if (result) {
@@ -205,9 +219,16 @@ function NewAssessment() {
             <MailWarning className="text-risk-high" />
             <AlertTitle>High-risk alert</AlertTitle>
             <AlertDescription>
-              {alertCount > 0
-                ? `An email alert has been sent to ${alertCount} staff member${alertCount === 1 ? "" : "s"} so the patient can be followed up promptly.`
-                : "No email alert was queued – check that email alerts are configured and that recipients have them switched on."}
+              <p>
+                A follow-up case has been opened (see{" "}
+                <Link href="/follow-up" className="font-medium text-primary underline">
+                  Follow-up
+                </Link>
+                ).{" "}
+                {alertCount + smsCount > 0
+                  ? `Alerts sent: ${alertCount} email${alertCount === 1 ? "" : "s"}, ${smsCount} SMS.`
+                  : "No alert could be queued – check the alert configuration and that staff have email/phone details."}
+              </p>
             </AlertDescription>
           </Alert>
         )}
@@ -231,7 +252,7 @@ function NewAssessment() {
         description={`Random Forest ${m.version} · ${m.features.length} clinical variables. All values refer to the current encounter.`}
       />
 
-      <form onSubmit={onSubmit} noValidate className="space-y-6">
+      <form onSubmit={onSubmit} onFocusCapture={markStart} onPointerDownCapture={markStart} noValidate className="space-y-6">
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Patient</CardTitle>

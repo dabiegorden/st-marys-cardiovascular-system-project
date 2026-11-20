@@ -65,8 +65,22 @@ export async function initModelRegistry() {
   await load(row);
 }
 
-async function load(row) {
+export function bandsFromCuts(lowMax, highMin) {
+  return [
+    { name: "low", label: "Low", min: 0, max: lowMax },
+    { name: "moderate", label: "Moderate", min: lowMax, max: highMin },
+    { name: "high", label: "High", min: highMin, max: 1 },
+  ];
+}
+
+async function loadModel(row) {
   const model = await LoadedModel.load(versionDir(row.artifactDir));
+  model.setOperatingPoint(row.decisionThreshold ?? undefined, row.riskBands ?? undefined);
+  return model;
+}
+
+async function load(row) {
+  const model = await loadModel(row);
   active = { row, model };
   console.log(`✓ Active model: ${row.version} (${model.order.length} features)`);
 }
@@ -84,7 +98,7 @@ export async function activateVersion(id, userId) {
     throw err;
   }
   // Load first: never switch the DB to a model that cannot be served.
-  const model = await LoadedModel.load(versionDir(target.artifactDir));
+  const model = await loadModel(target);
 
   const row = await db.transaction(async (tx) => {
     await tx
@@ -101,5 +115,25 @@ export async function activateVersion(id, userId) {
 
   active = { row, model };
   console.log(`✓ Activated model ${row.version}`);
+  return row;
+}
+
+/** Admin-chosen operating point for a version; applied immediately if it is active. */
+export async function updateOperatingPoint(id, { threshold, lowMax, highMin, reason }, userId) {
+  const riskBands = bandsFromCuts(lowMax, highMin);
+  const [row] = await db
+    .update(modelVersions)
+    .set({ decisionThreshold: threshold, riskBands, thresholdReason: reason, thresholdUpdatedAt: new Date(), thresholdUpdatedById: userId })
+    .where(eq(modelVersions.id, id))
+    .returning();
+  if (!row) {
+    const err = new Error("Model version not found.");
+    err.statusCode = 404;
+    throw err;
+  }
+  if (active?.row.id === id) {
+    active.model.setOperatingPoint(threshold, riskBands);
+    active.row = row;
+  }
   return row;
 }

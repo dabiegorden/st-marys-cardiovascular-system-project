@@ -86,6 +86,7 @@ export async function startTrainingJob({ file, searchMode, user }) {
   const args = [
     config.trainingScript,
     "--train-data", file.path,
+    "--train-name", file.originalname,
     "--external-data", config.externalValidationData,
     "--version", version,
     "--output-dir", outputDir,

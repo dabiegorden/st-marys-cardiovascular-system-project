@@ -24,8 +24,14 @@ export function loadSession(getSession) {
   };
 }
 
-/** Routes a user with a pending password change may still call */
+/** Routes a user with a pending password change or 2FA setup may still call */
 const PASSWORD_CHANGE_ALLOWED = new Set(["/api/me"]);
+
+let requireAdmin2fa = false;
+/** Called once at startup from app.js (kept configurable for tests). */
+export function setRequireAdmin2fa(value) {
+  requireAdmin2fa = Boolean(value);
+}
 
 export function requireAuth(req, res, next) {
   if (!req.user || req.user.banned) {
@@ -36,6 +42,13 @@ export function requireAuth(req, res, next) {
       success: false,
       error: "You must change your password before continuing.",
       code: "PASSWORD_CHANGE_REQUIRED",
+    });
+  }
+  if (requireAdmin2fa && req.user.role === "admin" && !req.user.twoFactorEnabled && !PASSWORD_CHANGE_ALLOWED.has(req.originalUrl.split("?")[0])) {
+    return res.status(403).json({
+      success: false,
+      error: "Administrators must set up two-factor authentication before continuing.",
+      code: "TWO_FACTOR_SETUP_REQUIRED",
     });
   }
   next();

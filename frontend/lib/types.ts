@@ -8,6 +8,10 @@ export interface Me {
   role: Role;
   mustChangePassword: boolean;
   highRiskAlerts: boolean;
+  smsAlerts: boolean;
+  phoneNumber: string | null;
+  twoFactorEnabled: boolean;
+  twoFactorRequired: boolean;
 }
 
 export interface FeatureOption {
@@ -101,7 +105,10 @@ export interface AssessmentListItem {
   hospitalNumber: string;
   clinicianName: string | null;
   modelVersion: string;
+  outcome?: Outcome | null;
 }
+
+export type Outcome = "cvd_confirmed" | "cvd_excluded";
 
 export interface Assessment {
   id: string;
@@ -117,6 +124,11 @@ export interface Assessment {
   riskBand: RiskBand;
   clinicianNote: string | null;
   createdAt: string;
+  decisionThreshold?: number | null;
+  outcome?: Outcome | null;
+  outcomeSource?: string | null;
+  outcomeNote?: string | null;
+  outcomeRecordedAt?: string | null;
   hospitalNumber: string;
   modelVersion: string;
   clinicianName?: string | null;
@@ -149,6 +161,35 @@ export interface ModelVersionSummary {
   nTrain: number;
   internal: Partial<Metrics> | null;
   external: Partial<Metrics> | null;
+  operatingPoint: {
+    threshold: number;
+    riskBands: RiskBandDef[];
+    custom: boolean;
+    reason: string | null;
+    updatedAt: string | null;
+  };
+}
+
+export interface ThresholdRow {
+  threshold: number;
+  sensitivity: number | null;
+  specificity: number | null;
+  ppv: number | null;
+  npv: number | null;
+  accuracy: number | null;
+  flagged_rate: number | null;
+}
+
+export interface DecisionCurvePoint {
+  threshold: number;
+  model: number | null;
+  treat_all: number;
+  treat_none: number;
+}
+
+export interface OperatingAnalysis {
+  threshold_table: ThresholdRow[];
+  decision_curve: DecisionCurvePoint[];
 }
 
 export interface Baseline {
@@ -201,6 +242,10 @@ export interface Manifest {
   }[];
   baselines: Baseline[];
   framework: Record<string, string>;
+  operating_analysis?: {
+    internal: OperatingAnalysis | null;
+    external: (OperatingAnalysis & { name: string })[];
+  };
 }
 
 export interface TrainingJob {
@@ -225,6 +270,9 @@ export interface UserRow {
   banned: boolean | null;
   mustChangePassword: boolean;
   highRiskAlerts: boolean;
+  smsAlerts: boolean;
+  phoneNumber: string | null;
+  twoFactorEnabled: boolean | null;
   createdAt: string;
 }
 
@@ -279,4 +327,175 @@ export interface AuditRow {
   entityId: string | null;
   details: Record<string, unknown> | null;
   ipAddress: string | null;
+}
+
+
+/* ---------------- follow-up cases ---------------- */
+export type CaseStatus = "open" | "acknowledged" | "reviewed" | "referred" | "closed";
+export type CaseAction = "acknowledge" | "review" | "refer" | "close" | "reopen" | "note";
+
+export interface CaseEvent {
+  id: number;
+  action: string;
+  fromStatus: string | null;
+  toStatus: string | null;
+  note: string | null;
+  createdAt: string;
+  userName: string | null;
+}
+
+export interface FollowUpCase {
+  id: string;
+  status: CaseStatus;
+  assessmentId: string;
+  assignedToId: string | null;
+  assigneeName: string | null;
+  acknowledgedAt: string | null;
+  closedAt: string | null;
+  escalatedAt: string | null;
+  escalationCount: number;
+  createdAt: string;
+  overdue: boolean;
+  events: CaseEvent[];
+}
+
+export interface CaseListItem {
+  id: string;
+  status: CaseStatus;
+  createdAt: string;
+  acknowledgedAt: string | null;
+  closedAt: string | null;
+  escalationCount: number;
+  assessmentId: string;
+  assignedToId: string | null;
+  assigneeName: string | null;
+  hospitalNumber: string;
+  probability: number;
+  outcome: Outcome | null;
+  overdue: boolean;
+}
+
+export interface CaseListResponse extends Paged<CaseListItem> {
+  counts: Partial<Record<CaseStatus, number>>;
+  timing: { medianAckMinutes: number | null; acknowledged: number; overdue: number };
+  escalationHours: number;
+}
+
+/* ---------------- local validation ---------------- */
+export interface Ci {
+  value: number | null;
+  low: number | null;
+  high: number | null;
+  n: number;
+}
+
+export interface LocalReport {
+  n: number;
+  positives: number;
+  accuracy: Ci;
+  sensitivity: Ci;
+  specificity: Ci;
+  ppv: Ci;
+  npv: Ci;
+  f1: number | null;
+  roc_auc: number | null;
+  brier: number | null;
+  confusion_matrix: { tn: number; fp: number; fn: number; tp: number };
+}
+
+export interface LocalValidation {
+  coverage: { withOutcome: number; totalAssessments: number };
+  overall: LocalReport;
+  byVersion: (LocalReport & { version: string })[];
+  byRiskBand: { riskBand: RiskBand; n: number; confirmed: number; observedRate: number | null }[];
+  decisionCurve: DecisionCurvePoint[];
+  minimumForConclusions: number;
+}
+
+/* ---------------- drift ---------------- */
+export type DriftLevel = "stable" | "moderate" | "significant" | "insufficient";
+
+export interface DriftReport {
+  modelVersion: string;
+  windowDays: number;
+  n: number;
+  minimum: number;
+  reliable: boolean;
+  available: boolean;
+  overall?: DriftLevel;
+  message?: string;
+  features: {
+    feature: string;
+    label: string;
+    type: "number" | "category";
+    psi: number | null;
+    level: DriftLevel;
+    trainingMean: number | null;
+    recentMean: number | null;
+    missingRate: number | null;
+    bins: { label: string; training: number; recent: number }[];
+  }[];
+  prediction: { positiveRate: number | null; meanProbability: number | null; trainingPrevalence: number | null } | null;
+}
+
+/* ---------------- usability ---------------- */
+export interface Stats5 {
+  n: number;
+  mean: number | null;
+  sd: number | null;
+  median: number | null;
+  q1: number | null;
+  q3: number | null;
+}
+
+export interface UsabilityReport {
+  sus: Stats5 & {
+    interpretation: { adjective: string; grade: string; acceptable: boolean } | null;
+    byRole: (Stats5 & { role: string })[];
+    items: { item: number; text: string; positive: boolean; mean: number | null }[];
+    responses: { id: string; role: string | null; score: number; comment: string | null; assessmentCount: number | null; createdAt: string; userName: string | null }[];
+  };
+  taskTime: { overall: Stats5; byExperience: (Stats5 & { label: string })[] };
+}
+
+export interface SusStatus {
+  completed: boolean;
+  assessmentsDone: number;
+  promptAfter: number;
+  shouldPrompt: boolean;
+  items: string[];
+}
+
+/* ---------------- SMS ---------------- */
+export interface SmsRow {
+  id: string;
+  kind: string;
+  status: NotificationStatus;
+  recipientPhone: string;
+  recipientName: string | null;
+  message: string;
+  assessmentId: string | null;
+  attempts: number;
+  lastError: string | null;
+  nextAttemptAt: string;
+  sentAt: string | null;
+  createdAt: string;
+}
+
+export interface SmsResponse extends Paged<SmsRow> {
+  summary: Partial<Record<NotificationStatus, number>>;
+  settings: { enabled: boolean; sender: string | null; sandbox: boolean; keyConfigured: boolean };
+  balance: { sms_balance?: number | string; main_balance?: string; error?: string } | null;
+  senderStatus: { status: string; message?: string | null } | null;
+  usersWithoutPhone: { id: string; name: string }[];
+  optedOutUsers: { id: string; name: string }[];
+}
+
+export interface SmsAlertRecipient {
+  id: string;
+  recipientName: string | null;
+  recipientPhone: string;
+  status: NotificationStatus;
+  sentAt: string | null;
+  createdAt: string;
 }

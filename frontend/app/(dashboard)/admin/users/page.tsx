@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BellOff, Copy, KeyRound, Loader2, MoreHorizontal, Pencil, UserPlus } from "lucide-react";
+import { BellOff, Copy, KeyRound, Loader2, MoreHorizontal, Pencil, ShieldCheck, ShieldOff, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useMe } from "@/lib/hooks";
@@ -63,26 +63,29 @@ export default function UsersPage() {
   const qc = useQueryClient();
   const { data: me } = useMe();
   const [createOpen, setCreateOpen] = useState(false);
-  const [form, setForm] = useState<{ name: string; email: string; role: Role }>({ name: "", email: "", role: "clinician" });
+  const [form, setForm] = useState<{ name: string; email: string; role: Role; phoneNumber: string }>({ name: "", email: "", role: "clinician", phoneNumber: "" });
   const [temp, setTemp] = useState<{ email: string; password: string } | null>(null);
-  const [editing, setEditing] = useState<{ id: string; name: string; email: string } | null>(null);
+  const [editing, setEditing] = useState<{ id: string; name: string; email: string; phoneNumber: string } | null>(null);
 
   const users = useQuery({ queryKey: ["admin", "users"], queryFn: () => api<{ items: UserRow[] }>("/admin/users").then((r) => r.items) });
   const refresh = () => qc.invalidateQueries({ queryKey: ["admin", "users"] });
   const onError = (e: unknown) => toast.error(e instanceof Error ? e.message : "Action failed.");
 
   const create = useMutation({
-    mutationFn: () => api<{ user: UserRow; temporaryPassword: string }>("/admin/users", { method: "POST", json: form }),
+    mutationFn: () => api<{ user: UserRow; temporaryPassword: string }>("/admin/users", {
+        method: "POST",
+        json: { ...form, phoneNumber: form.phoneNumber.trim() || undefined },
+      }),
     onSuccess: (r) => {
       setCreateOpen(false);
-      setForm({ name: "", email: "", role: "clinician" });
+      setForm({ name: "", email: "", role: "clinician", phoneNumber: "" });
       setTemp({ email: r.user.email, password: r.temporaryPassword });
       refresh();
     },
     onError,
   });
   const update = useMutation({
-    mutationFn: ({ id, body }: { id: string; body: { role?: Role; active?: boolean; name?: string; email?: string } }) =>
+    mutationFn: ({ id, body }: { id: string; body: { role?: Role; active?: boolean; name?: string; email?: string; phoneNumber?: string | null } }) =>
       api(`/admin/users/${id}`, { method: "PATCH", json: body }),
     onSuccess: () => {
       toast.success("User updated.");
@@ -96,6 +99,15 @@ export default function UsersPage() {
     mutationFn: (u: UserRow) => api<{ temporaryPassword: string }>(`/admin/users/${u.id}/reset-password`, { method: "POST" }),
     onSuccess: (r, u) => {
       setTemp({ email: u.email, password: r.temporaryPassword });
+      refresh();
+    },
+    onError,
+  });
+
+  const reset2fa = useMutation({
+    mutationFn: (u: UserRow) => api(`/admin/users/${u.id}/reset-2fa`, { method: "POST" }),
+    onSuccess: () => {
+      toast.success("Two-factor authentication reset. The user will set it up again at next sign-in.");
       refresh();
     },
     onError,
@@ -123,6 +135,7 @@ export default function UsersPage() {
               <TableRow>
                 <TableHead>Name</TableHead>
                 <TableHead>Email</TableHead>
+                <TableHead>Phone</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Created</TableHead>
@@ -143,6 +156,14 @@ export default function UsersPage() {
                       )}
                     </TableCell>
                     <TableCell className="text-muted-foreground">{u.email}</TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      {u.phoneNumber ? `+${u.phoneNumber}` : <span className="text-xs">not set</span>}
+                      {u.twoFactorEnabled && (
+                        <span className="ml-2 inline-flex items-center gap-0.5 text-xs text-tile-mint-icon" title="Two-factor authentication on">
+                          <ShieldCheck className="size-3.5" /> 2FA
+                        </span>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <Badge variant={u.role === "admin" ? "default" : "secondary"} className="capitalize">
                         {u.role}
@@ -166,12 +187,17 @@ export default function UsersPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => setEditing({ id: u.id, name: u.name, email: u.email })}>
-                            <Pencil /> Edit name / email
+                          <DropdownMenuItem onClick={() => setEditing({ id: u.id, name: u.name, email: u.email, phoneNumber: u.phoneNumber ?? "" })}>
+                            <Pencil /> Edit details
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => reset.mutate(u)}>
                             <KeyRound /> Reset password
                           </DropdownMenuItem>
+                          {u.twoFactorEnabled && !self && (
+                            <DropdownMenuItem onClick={() => reset2fa.mutate(u)}>
+                              <ShieldOff /> Reset two-factor (lost phone)
+                            </DropdownMenuItem>
+                          )}
                           {!self && (
                             <>
                               <DropdownMenuItem
@@ -221,6 +247,10 @@ export default function UsersPage() {
               <Input id="email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
             </div>
             <div className="space-y-1.5">
+              <Label htmlFor="phone">Mobile number (for SMS alerts)</Label>
+              <Input id="phone" inputMode="tel" placeholder="e.g. 024 123 4567" value={form.phoneNumber} onChange={(e) => setForm({ ...form, phoneNumber: e.target.value })} />
+            </div>
+            <div className="space-y-1.5">
               <Label>Role</Label>
               <Select value={form.role} onValueChange={(v) => setForm({ ...form, role: v as Role })}>
                 <SelectTrigger className="w-full">
@@ -255,7 +285,7 @@ export default function UsersPage() {
               className="space-y-4"
               onSubmit={(e) => {
                 e.preventDefault();
-                update.mutate({ id: editing.id, body: { name: editing.name.trim(), email: editing.email.trim() } });
+                update.mutate({ id: editing.id, body: { name: editing.name.trim(), email: editing.email.trim(), phoneNumber: editing.phoneNumber.trim() || null } });
               }}
             >
               <div className="space-y-1.5">
@@ -265,6 +295,10 @@ export default function UsersPage() {
               <div className="space-y-1.5">
                 <Label htmlFor="edit-email">Email</Label>
                 <Input id="edit-email" type="email" value={editing.email} onChange={(e) => setEditing({ ...editing, email: e.target.value })} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-phone">Mobile number</Label>
+                <Input id="edit-phone" inputMode="tel" placeholder="e.g. 024 123 4567" value={editing.phoneNumber} onChange={(e) => setEditing({ ...editing, phoneNumber: e.target.value })} />
               </div>
               <DialogFooter>
                 <Button

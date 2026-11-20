@@ -58,6 +58,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 from sklearn.tree import DecisionTreeClassifier
 
+from cvd.analysis import feature_distribution, operating_analysis
 from cvd.data import load_dataset
 from cvd.evaluate import classification_metrics
 from cvd.features import DECISION_THRESHOLD, FEATURE_NAMES, FEATURES, RISK_BANDS
@@ -121,6 +122,7 @@ def nan_to_none(row: dict) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--train-data", default=str(DEFAULT_TRAIN))
+    ap.add_argument("--train-name", default=None, help="display name of the training file (defaults to its filename)")
     ap.add_argument("--external-data", nargs="*", default=[str(p) for p in DEFAULT_EXTERNAL])
     ap.add_argument("--version", default="rf-v1")
     ap.add_argument("--output-dir", default=None, help="default: backend/model_store/<version>")
@@ -135,7 +137,7 @@ def main() -> None:
 
     # ── 1. Data ─────────────────────────────────────────────────────
     progress(5, "Loading training dataset")
-    train_ds = load_dataset(args.train_data, name=Path(args.train_data).name)
+    train_ds = load_dataset(args.train_data, name=args.train_name or Path(args.train_data).name)
     log.info("Training data: %s (%s) %s", train_ds.name, train_ds.schema, train_ds.report)
     if train_ds.n < 50 or train_ds.y.nunique() < 2:
         raise SystemExit("Training data needs at least 50 usable rows and both classes.")
@@ -262,6 +264,15 @@ def main() -> None:
         feature_stats[f["name"]] = {"min": round(float(col.min()), 3), "max": round(float(col.max()), 3),
                                     "median": round(float(col.median()), 3), "reference": round(ref, 3)}
 
+    # Operating-point analysis (threshold table + decision curve) and the
+    # training distribution used for drift monitoring
+    progress(93, "Computing threshold and decision-curve analysis")
+    operating = {
+        "internal": operating_analysis(y_test, model.predict_proba(X_test)[:, 1]),
+        "external": [{"name": ds.name, **operating_analysis(ds.y, model.predict_proba(ds.X)[:, 1])} for ds in externals],
+    }
+    distribution = feature_distribution(X_train, FEATURES)
+
     # ── 6. Manifest ─────────────────────────────────────────────────
     progress(95, "Writing manifest")
     manifest = {
@@ -293,6 +304,8 @@ def main() -> None:
             "external_skipped": skipped,
         },
         "feature_importance": importance,
+        "operating_analysis": operating,
+        "feature_distribution": distribution,
         "baselines": baselines,
         "parity_fixtures": fixtures,
         "duration_seconds": round(time.time() - started, 1),

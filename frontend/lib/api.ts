@@ -26,6 +26,8 @@ function handleAuthRedirect(err: ApiError) {
     window.location.href = `/login?next=${encodeURIComponent(here + window.location.search)}`;
   } else if (err.code === "PASSWORD_CHANGE_REQUIRED" && !here.startsWith("/change-password")) {
     window.location.href = "/change-password";
+  } else if (err.code === "TWO_FACTOR_SETUP_REQUIRED" && !here.startsWith("/setup-2fa")) {
+    window.location.href = "/setup-2fa";
   }
 }
 

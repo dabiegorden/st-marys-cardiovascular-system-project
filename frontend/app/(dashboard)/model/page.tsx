@@ -7,6 +7,7 @@ import { date } from "@/lib/format";
 import { ErrorState, PageHeader } from "@/components/common";
 import { PageLoading } from "@/components/app-shell";
 import { ModelPerformance } from "@/components/model-performance";
+import { LocalValidationCard } from "@/components/local-validation";
 
 export default function ModelPage() {
   const q = useQuery({
@@ -24,7 +25,10 @@ export default function ModelPage() {
         title="Model performance"
         description={`Random Forest ${q.data.version} · trained ${date(q.data.manifest.created_at)} · in use since ${date(q.data.activatedAt)}`}
       />
-      <ModelPerformance manifest={q.data.manifest} />
+      <div className="space-y-6">
+        <LocalValidationCard manifest={q.data.manifest} />
+        <ModelPerformance manifest={q.data.manifest} />
+      </div>
     </>
   );
 }

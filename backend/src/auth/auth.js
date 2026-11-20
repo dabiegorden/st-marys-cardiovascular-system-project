@@ -11,14 +11,14 @@
 
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { admin } from "better-auth/plugins";
+import { admin, twoFactor } from "better-auth/plugins";
 import { createAccessControl } from "better-auth/plugins/access";
 import { defaultStatements, adminAc } from "better-auth/plugins/admin/access";
 import { createAuthMiddleware } from "better-auth/api";
 import { eq } from "drizzle-orm";
 
 import { db } from "../db/db.js";
-import { users, sessions, accounts, verifications } from "../db/schema.js";
+import { users, sessions, accounts, verifications, twoFactors } from "../db/schema.js";
 import { config } from "../config.js";
 import { writeAudit } from "../services/audit.js";
 
@@ -38,7 +38,7 @@ export const auth = betterAuth({
 
   database: drizzleAdapter(db, {
     provider: "pg",
-    schema: { user: users, session: sessions, account: accounts, verification: verifications },
+    schema: { user: users, session: sessions, account: accounts, verification: verifications, twoFactor: twoFactors },
   }),
 
   emailAndPassword: {
@@ -53,6 +53,8 @@ export const auth = betterAuth({
     additionalFields: {
       mustChangePassword: { type: "boolean", defaultValue: false, input: false },
       highRiskAlerts: { type: "boolean", defaultValue: true, input: false },
+      smsAlerts: { type: "boolean", defaultValue: true, input: false },
+      phoneNumber: { type: "string", required: false, input: false },
     },
   },
 
@@ -68,6 +70,8 @@ export const auth = betterAuth({
     customRules: {
       "/sign-in/email": { window: 15 * 60, max: 10 },
       "/change-password": { window: 15 * 60, max: 10 },
+      "/two-factor/verify-totp": { window: 15 * 60, max: 10 },
+      "/two-factor/verify-backup-code": { window: 15 * 60, max: 10 },
     },
   },
 
@@ -82,6 +86,8 @@ export const auth = betterAuth({
       defaultRole: "clinician",
       adminRoles: ["admin"],
     }),
+    // Authenticator-app (TOTP) second factor + one-time backup codes
+    twoFactor({ issuer: "St Marys CVD Support" }),
   ],
 
   hooks: {
@@ -94,12 +100,28 @@ export const auth = betterAuth({
 
       if (ctx.path === "/sign-in/email") {
         const newSession = ctx.context.newSession;
+        const challenged = ctx.context.returned?.twoFactorRedirect === true;
         await writeAudit({
-          action: newSession ? "auth.login" : "auth.login_failed",
+          action: newSession ? "auth.login" : challenged ? "auth.login_2fa_challenge" : "auth.login_failed",
           userId: newSession?.user.id ?? null,
           actorEmail: newSession?.user.email ?? ctx.body?.email ?? null,
           ...meta,
         });
+      }
+
+      if (ctx.path === "/two-factor/verify-totp" || ctx.path === "/two-factor/verify-backup-code") {
+        const newSession = ctx.context.newSession;
+        const ok = newSession || (ctx.context.returned && !(ctx.context.returned instanceof Error) && ctx.context.returned?.token);
+        await writeAudit({
+          action: ok ? (ctx.path.endsWith("backup-code") ? "auth.login_2fa_backup_code" : "auth.login_2fa") : "auth.2fa_failed",
+          userId: newSession?.user.id ?? ctx.context.session?.user.id ?? null,
+          actorEmail: newSession?.user.email ?? ctx.context.session?.user.email ?? null,
+          ...meta,
+        });
+      }
+
+      if (ctx.path === "/two-factor/disable" && ctx.context.session) {
+        await writeAudit({ action: "auth.2fa_disabled", userId: ctx.context.session.user.id, ...meta });
       }
 
       if (ctx.path === "/sign-out") {

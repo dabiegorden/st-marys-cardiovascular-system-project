@@ -20,6 +20,7 @@ export default function AssessmentsPage() {
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
   const [riskBand, setRiskBand] = useState("all");
+  const [outcome, setOutcome] = useState("all");
   const [scope, setScope] = useState("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -28,6 +29,7 @@ export default function AssessmentsPage() {
     q: q.trim() || undefined,
     riskBand: riskBand === "all" ? undefined : riskBand,
     mine: scope === "mine" ? "true" : undefined,
+    outcome: outcome === "all" ? undefined : outcome,
     from: from || undefined,
     to: to ? `${to}T23:59:59` : undefined,
   };
@@ -90,6 +92,16 @@ export default function AssessmentsPage() {
                 <SelectItem value="high">High risk</SelectItem>
                 <SelectItem value="moderate">Moderate risk</SelectItem>
                 <SelectItem value="low">Low risk</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={outcome} onValueChange={set(setOutcome)}>
+              <SelectTrigger className="w-44" aria-label="Outcome filter">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Any outcome</SelectItem>
+                <SelectItem value="pending">Awaiting outcome</SelectItem>
+                <SelectItem value="recorded">Outcome recorded</SelectItem>
               </SelectContent>
             </Select>
             <Input type="date" className="w-40" aria-label="From date" value={from} onChange={(e) => set(setFrom)(e.target.value)} />

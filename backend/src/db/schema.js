@@ -59,6 +59,10 @@ export const users = pgTable("users", {
   // application
   mustChangePassword: boolean("must_change_password").notNull().default(false),
   highRiskAlerts: boolean("high_risk_alerts").notNull().default(true), // email preference
+  phoneNumber: text("phone_number"), // international format without "+", e.g. 233241234567
+  smsAlerts: boolean("sms_alerts").notNull().default(true), // SMS preference
+  twoFactorEnabled: boolean("two_factor_enabled").default(false), // Better Auth twoFactor plugin
+  susDismissedAt: tz("sus_dismissed_at"), // usability questionnaire postponed
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -103,6 +107,22 @@ export const accounts = pgTable(
   (t) => [index("accounts_user_id_idx").on(t.userId)],
 );
 
+export const twoFactors = pgTable(
+  "two_factors",
+  {
+    id: text("id").primaryKey(),
+    secret: text("secret").notNull(), // encrypted TOTP secret
+    backupCodes: text("backup_codes").notNull(), // encrypted
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    verified: boolean("verified").default(true),
+    failedVerificationCount: integer("failed_verification_count").default(0),
+    lockedUntil: tz("locked_until"),
+  },
+  (t) => [index("two_factors_user_idx").on(t.userId), index("two_factors_secret_idx").on(t.secret)],
+);
+
 export const verifications = pgTable("verifications", {
   id: text("id").primaryKey(),
   identifier: text("identifier").notNull(),
@@ -127,6 +147,8 @@ export const jobStatusEnum = pgEnum("job_status", [
   "failed",
 ]);
 export const riskBandEnum = pgEnum("risk_band", ["low", "moderate", "high"]);
+export const outcomeEnum = pgEnum("assessment_outcome", ["cvd_confirmed", "cvd_excluded"]);
+export const caseStatusEnum = pgEnum("case_status", ["open", "acknowledged", "reviewed", "referred", "closed"]);
 
 /* ============================================================
  * PATIENTS
@@ -154,6 +176,12 @@ export const modelVersions = pgTable(
     artifactDir: text("artifact_dir").notNull(), // relative to MODEL_STORE_DIR
     manifest: jsonb("manifest").notNull(), // full training/evaluation manifest
     trainingJobId: uuid("training_job_id"),
+    // Operating point chosen by an administrator (overrides the manifest defaults)
+    decisionThreshold: doublePrecision("decision_threshold"),
+    riskBands: jsonb("risk_bands"),
+    thresholdReason: text("threshold_reason"),
+    thresholdUpdatedAt: tz("threshold_updated_at"),
+    thresholdUpdatedById: text("threshold_updated_by_id").references(() => users.id, { onDelete: "set null" }),
     createdById: text("created_by_id").references(() => users.id, {
       onDelete: "set null",
     }),
@@ -232,8 +260,17 @@ export const assessments = pgTable(
     prediction: smallint("prediction").notNull(), // 1 = CVD likely
     probability: doublePrecision("probability").notNull(),
     riskBand: riskBandEnum("risk_band").notNull(),
+    decisionThreshold: doublePrecision("decision_threshold"), // operating point used
+    formDurationMs: integer("form_duration_ms"), // time to complete the form (usability)
 
     clinicianNote: text("clinician_note"),
+
+    // Confirmed outcome, recorded later (local validation)
+    outcome: outcomeEnum("outcome"),
+    outcomeSource: text("outcome_source"), // e.g. "Echocardiogram", "Cardiology review"
+    outcomeNote: text("outcome_note"),
+    outcomeRecordedAt: tz("outcome_recorded_at"),
+    outcomeRecordedById: text("outcome_recorded_by_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -314,4 +351,97 @@ export const emailNotifications = pgTable(
     index("email_notifications_assessment_idx").on(t.assessmentId),
     index("email_notifications_created_at_idx").on(t.createdAt),
   ],
+);
+
+/* ============================================================
+ * HIGH-RISK FOLLOW-UP CASES
+ * Every high-risk assessment opens a case that must be acknowledged and
+ * closed; unacknowledged cases are escalated by a background job.
+ * ============================================================ */
+export const highRiskCases = pgTable(
+  "high_risk_cases",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    assessmentId: uuid("assessment_id")
+      .notNull()
+      .unique()
+      .references(() => assessments.id, { onDelete: "cascade" }),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patients.id, { onDelete: "restrict" }),
+    status: caseStatusEnum("status").notNull().default("open"),
+    assignedToId: text("assigned_to_id").references(() => users.id, { onDelete: "set null" }),
+    acknowledgedAt: tz("acknowledged_at"),
+    acknowledgedById: text("acknowledged_by_id").references(() => users.id, { onDelete: "set null" }),
+    closedAt: tz("closed_at"),
+    closedById: text("closed_by_id").references(() => users.id, { onDelete: "set null" }),
+    escalatedAt: tz("escalated_at"),
+    escalationCount: integer("escalation_count").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("high_risk_cases_status_idx").on(t.status), index("high_risk_cases_created_at_idx").on(t.createdAt)],
+);
+
+export const caseEvents = pgTable(
+  "case_events",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    caseId: uuid("case_id")
+      .notNull()
+      .references(() => highRiskCases.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    action: text("action").notNull(), // created | acknowledged | reviewed | referred | closed | reopened | note | escalated
+    fromStatus: text("from_status"),
+    toStatus: text("to_status"),
+    note: text("note"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("case_events_case_idx").on(t.caseId)],
+);
+
+/* ============================================================
+ * SMS NOTIFICATIONS (outbox, delivered through Arkesel)
+ * ============================================================ */
+export const smsNotifications = pgTable(
+  "sms_notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: text("kind").notNull(), // "high_risk_alert" | "case_escalation" | "test"
+    dedupeKey: text("dedupe_key").notNull().unique(),
+    recipientUserId: text("recipient_user_id").references(() => users.id, { onDelete: "set null" }),
+    recipientPhone: text("recipient_phone").notNull(),
+    assessmentId: uuid("assessment_id").references(() => assessments.id, { onDelete: "set null" }),
+    message: text("message").notNull(),
+    status: notificationStatusEnum("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: tz("next_attempt_at").notNull().defaultNow(),
+    lastError: text("last_error"),
+    providerMessageId: text("provider_message_id"),
+    sentAt: tz("sent_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("sms_notifications_due_idx").on(t.status, t.nextAttemptAt),
+    index("sms_notifications_assessment_idx").on(t.assessmentId),
+  ],
+);
+
+/* ============================================================
+ * USABILITY STUDY – System Usability Scale (SUS) responses
+ * ============================================================ */
+export const susResponses = pgTable(
+  "sus_responses",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    role: text("role"),
+    answers: smallint("answers").array().notNull(), // 10 answers, 1-5
+    score: doublePrecision("score").notNull(), // 0-100
+    comment: text("comment"),
+    assessmentCount: integer("assessment_count"), // experience at time of response
+    createdAt: createdAt(),
+  },
+  (t) => [index("sus_responses_created_at_idx").on(t.createdAt)],
 );

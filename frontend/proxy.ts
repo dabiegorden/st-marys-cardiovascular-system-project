@@ -7,6 +7,8 @@ import { getSessionCookie } from "better-auth/cookies";
  * session and role on every request.
  */
 export function proxy(request: NextRequest) {
+  // The landing page is public; everything else requires a session
+  if (request.nextUrl.pathname === "/") return NextResponse.next();
   if (!getSessionCookie(request)) {
     const url = new URL("/login", request.url);
     const next = request.nextUrl.pathname + request.nextUrl.search;

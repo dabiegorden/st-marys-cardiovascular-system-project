@@ -17,6 +17,11 @@
  *   POST  /api/admin/notifications/test        send a test email to yourself
  *   POST  /api/admin/notifications/digest      queue today's digest now
  *   POST  /api/admin/notifications/:id/retry   re-queue a failed/skipped email
+ *   PUT   /api/admin/models/:id/operating-point decision threshold + risk bands
+ *   GET   /api/admin/monitoring/drift          population stability index per input
+ *   GET   /api/admin/usability (+ /export.csv) SUS results and task timing
+ *   GET   /api/admin/sms · POST /sms/test · POST /sms/:id/retry   Arkesel SMS
+ *   POST  /api/admin/users/:id/reset-2fa       remove a user's authenticator
  */
 
 import express from "express";
@@ -29,12 +34,16 @@ import { and, count, desc, eq, gte, lte, ilike, or } from "drizzle-orm";
 import { fromNodeHeaders } from "better-auth/node";
 
 import { db } from "../db/db.js";
-import { modelVersions, trainingJobs, users, auditLogs, assessments, patients, emailNotifications } from "../db/schema.js";
+import { modelVersions, trainingJobs, users, auditLogs, assessments, patients, emailNotifications, smsNotifications, twoFactors, susResponses } from "../db/schema.js";
+import { enqueueTestSms, retrySms } from "../notifications/sms-outbox.js";
+import { getBalance, getSenderIdStatus } from "../notifications/arkesel.js";
+import { normalizeGhanaPhone } from "../notifications/sms-templates.js";
+import { driftReport, usabilityReport, SUS_ITEMS } from "../services/insights.js";
 import { enqueueDailyDigest, enqueueTestEmail, retryNotification } from "../notifications/outbox.js";
 import { jobSchedule } from "../notifications/scheduler.js";
 import { isUndeliverableAddress } from "../notifications/templates.js";
 import { asyncHandler, HttpError, parse } from "../middleware/errorHandler.js";
-import { activateVersion, getActiveModel } from "../ml/registry.js";
+import { activateVersion, getActiveModel, updateOperatingPoint } from "../ml/registry.js";
 import { startTrainingJob } from "../services/training.js";
 import { audit } from "../services/audit.js";
 import { auth, ROLE_NAMES } from "../auth/auth.js";
@@ -59,6 +68,13 @@ function summarise(row) {
     nTrain: m.training_data?.n_train,
     internal: pick(m.evaluation?.internal_test),
     external: pick(m.evaluation?.external?.[0]?.metrics),
+    operatingPoint: {
+      threshold: row.decisionThreshold ?? m.decision_threshold,
+      riskBands: row.riskBands ?? m.risk_bands,
+      custom: row.decisionThreshold !== null && row.decisionThreshold !== undefined,
+      reason: row.thresholdReason ?? null,
+      updatedAt: row.thresholdUpdatedAt ?? null,
+    },
   };
 }
 
@@ -93,6 +109,74 @@ router.post(
       details: { version: row.version, previous },
     });
     res.json({ success: true, model: summarise(row) });
+  }),
+);
+
+router.put(
+  "/models/:id/operating-point",
+  asyncHandler(async (req, res) => {
+    const { id } = parse(uuidParam, req.params);
+    const body = parse(
+      z
+        .object({
+          threshold: z.number().min(0.05).max(0.95),
+          lowMax: z.number().min(0.05).max(0.9),
+          highMin: z.number().min(0.1).max(0.95),
+          reason: z.string().trim().min(10, "Explain the clinical reason (at least 10 characters).").max(1000),
+        })
+        .refine((b) => b.lowMax < b.highMin, { message: "The low-risk limit must be below the high-risk limit.", path: ["lowMax"] }),
+      req.body,
+    );
+    const [before] = await db.select().from(modelVersions).where(eq(modelVersions.id, id));
+    if (!before) throw new HttpError(404, "Model version not found.");
+    const row = await updateOperatingPoint(id, body, req.user.id);
+    await audit(req, "model.operating_point", {
+      entityType: "model_version",
+      entityId: id,
+      details: {
+        version: row.version,
+        from: { threshold: before.decisionThreshold ?? before.manifest.decision_threshold },
+        to: { threshold: body.threshold, lowMax: body.lowMax, highMin: body.highMin },
+        reason: body.reason,
+      },
+    });
+    res.json({ success: true, model: summarise(row) });
+  }),
+);
+
+/* ---------------- monitoring & usability ---------------- */
+router.get(
+  "/monitoring/drift",
+  asyncHandler(async (req, res) => {
+    const { days } = parse(z.object({ days: z.coerce.number().int().min(7).max(365).default(config.monitoring.driftWindowDays) }), req.query);
+    res.json({ success: true, drift: await driftReport(days) });
+  }),
+);
+
+router.get(
+  "/usability",
+  asyncHandler(async (_req, res) => {
+    res.json({ success: true, usability: await usabilityReport() });
+  }),
+);
+
+router.get(
+  "/usability/export.csv",
+  asyncHandler(async (req, res) => {
+    const rows = await db.select().from(susResponses).orderBy(susResponses.createdAt);
+    const esc = (v) => {
+      const t = v == null ? "" : String(v);
+      return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+    };
+    const header = ["response_id", "created_at", "role", "assessments_done", ...SUS_ITEMS.map((_, i) => `q${i + 1}`), "sus_score", "comment"];
+    const lines = [header.join(",")];
+    for (const r of rows) {
+      lines.push([r.id, new Date(r.createdAt).toISOString(), r.role, r.assessmentCount, ...r.answers, r.score, r.comment].map(esc).join(","));
+    }
+    await audit(req, "usability.export", { details: { rows: rows.length } });
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="sus-responses-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send(lines.join("\n"));
   }),
 );
 
@@ -171,8 +255,19 @@ const publicUser = {
   banned: users.banned,
   mustChangePassword: users.mustChangePassword,
   highRiskAlerts: users.highRiskAlerts,
+  smsAlerts: users.smsAlerts,
+  phoneNumber: users.phoneNumber,
+  twoFactorEnabled: users.twoFactorEnabled,
   createdAt: users.createdAt,
 };
+
+function phoneOrError(value) {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+  const phone = normalizeGhanaPhone(value);
+  if (!phone) throw new HttpError(400, "Enter a valid Ghana mobile number, e.g. 024 123 4567.");
+  return phone;
+}
 
 function temporaryPassword() {
   // 14 chars, unambiguous alphabet, cryptographically random
@@ -196,9 +291,12 @@ router.post(
         name: z.string().trim().min(2).max(100),
         email: z.string().trim().toLowerCase().email(),
         role: z.enum(ROLE_NAMES),
+        phoneNumber: z.string().trim().max(20).nullable().optional(),
       }),
       req.body,
     );
+    const phone = phoneOrError(body.phoneNumber);
+    delete body.phoneNumber;
     const [exists] = await db.select({ id: users.id }).from(users).where(eq(users.email, body.email));
     if (exists) throw new HttpError(409, "A user with this email already exists.");
 
@@ -209,7 +307,7 @@ router.post(
     });
     const id = created.user.id;
     // additionalFields with input:false may be ignored by createUser – enforce it
-    await db.update(users).set({ mustChangePassword: true }).where(eq(users.id, id));
+    await db.update(users).set({ mustChangePassword: true, ...(phone ? { phoneNumber: phone } : {}) }).where(eq(users.id, id));
 
     await audit(req, "user.create", { entityType: "user", entityId: id, details: { email: body.email, role: body.role } });
     const [user] = await db.select(publicUser).from(users).where(eq(users.id, id));
@@ -227,20 +325,26 @@ router.patch(
         active: z.boolean().optional(),
         name: z.string().trim().min(2).max(100).optional(),
         email: z.string().trim().toLowerCase().email().optional(),
+        phoneNumber: z.string().trim().max(20).nullable().optional(),
       }),
       req.body,
     );
+    const phone = phoneOrError(body.phoneNumber);
     if (id === req.user.id && (body.role || body.active !== undefined)) {
       throw new HttpError(400, "You cannot change your own role or status.");
     }
     const headers = fromNodeHeaders(req.headers);
 
-    if (body.name || body.email) {
+    if (body.name || body.email || phone !== undefined) {
       if (body.email) {
         const [taken] = await db.select({ id: users.id }).from(users).where(eq(users.email, body.email));
         if (taken && taken.id !== id) throw new HttpError(409, "Another user already has this email.");
       }
-      const details = { ...(body.name ? { name: body.name } : {}), ...(body.email ? { email: body.email } : {}) };
+      const details = {
+        ...(body.name ? { name: body.name } : {}),
+        ...(body.email ? { email: body.email } : {}),
+        ...(phone !== undefined ? { phoneNumber: phone } : {}),
+      };
       await db.update(users).set(details).where(eq(users.id, id));
       await audit(req, "user.details_update", { entityType: "user", entityId: id, details });
     }
@@ -275,6 +379,20 @@ router.post(
     }
     await audit(req, "user.password_reset", { entityType: "user", entityId: id });
     res.json({ success: true, temporaryPassword: password });
+  }),
+);
+
+router.post(
+  "/users/:id/reset-2fa",
+  asyncHandler(async (req, res) => {
+    const { id } = parse(idParam, req.params);
+    if (id === req.user.id) throw new HttpError(400, "Use Settings to manage your own two-factor authentication.");
+    await db.delete(twoFactors).where(eq(twoFactors.userId, id));
+    const [u] = await db.update(users).set({ twoFactorEnabled: false }).where(eq(users.id, id)).returning({ id: users.id });
+    if (!u) throw new HttpError(404, "User not found.");
+    await auth.api.revokeUserSessions({ body: { userId: id }, headers: fromNodeHeaders(req.headers) });
+    await audit(req, "user.2fa_reset", { entityType: "user", entityId: id });
+    res.json({ success: true });
   }),
 );
 
@@ -461,6 +579,85 @@ router.post(
     const row = await retryNotification(id);
     if (!row) throw new HttpError(404, "No failed or skipped notification with this id.");
     await audit(req, "notification.retry", { entityType: "email_notification", entityId: id });
+    res.json({ success: true });
+  }),
+);
+
+/* ---------------- SMS (Arkesel) ---------------- */
+router.get(
+  "/sms",
+  asyncHandler(async (req, res) => {
+    const q = parse(
+      z.object({
+        page: z.coerce.number().int().min(1).default(1),
+        pageSize: z.coerce.number().int().min(1).max(100).default(25),
+        status: z.enum(["pending", "sending", "sent", "failed", "skipped"]).optional(),
+      }),
+      req.query,
+    );
+    const where = q.status ? eq(smsNotifications.status, q.status) : undefined;
+    const weekAgo = new Date(Date.now() - 7 * 864e5);
+    const [items, [{ total }], summary, staff, balance, sender] = await Promise.all([
+      db
+        .select({
+          id: smsNotifications.id,
+          kind: smsNotifications.kind,
+          status: smsNotifications.status,
+          recipientPhone: smsNotifications.recipientPhone,
+          recipientName: users.name,
+          message: smsNotifications.message,
+          assessmentId: smsNotifications.assessmentId,
+          attempts: smsNotifications.attempts,
+          lastError: smsNotifications.lastError,
+          nextAttemptAt: smsNotifications.nextAttemptAt,
+          sentAt: smsNotifications.sentAt,
+          createdAt: smsNotifications.createdAt,
+        })
+        .from(smsNotifications)
+        .leftJoin(users, eq(smsNotifications.recipientUserId, users.id))
+        .where(where)
+        .orderBy(desc(smsNotifications.createdAt))
+        .limit(q.pageSize)
+        .offset((q.page - 1) * q.pageSize),
+      db.select({ total: count() }).from(smsNotifications).where(where),
+      db.select({ status: smsNotifications.status, total: count() }).from(smsNotifications).where(gte(smsNotifications.createdAt, weekAgo)).groupBy(smsNotifications.status),
+      db.select({ id: users.id, name: users.name, phoneNumber: users.phoneNumber, smsAlerts: users.smsAlerts, banned: users.banned }).from(users),
+      getBalance(),
+      getSenderIdStatus(),
+    ]);
+    res.json({
+      success: true,
+      items,
+      total,
+      page: q.page,
+      pageSize: q.pageSize,
+      summary: Object.fromEntries(summary.map((s) => [s.status, s.total])),
+      settings: { enabled: config.sms.enabled, sender: config.sms.sender, sandbox: config.sms.sandbox, keyConfigured: Boolean(config.sms.apiKey) },
+      balance,
+      senderStatus: sender,
+      usersWithoutPhone: staff.filter((u) => !u.banned && !u.phoneNumber).map(({ id, name }) => ({ id, name })),
+      optedOutUsers: staff.filter((u) => !u.smsAlerts).map(({ id, name }) => ({ id, name })),
+    });
+  }),
+);
+
+router.post(
+  "/sms/test",
+  asyncHandler(async (req, res) => {
+    const [me] = await db.select({ id: users.id, name: users.name, phoneNumber: users.phoneNumber }).from(users).where(eq(users.id, req.user.id));
+    const row = await enqueueTestSms(me);
+    await audit(req, "sms.test", { entityType: "sms_notification", entityId: row.id });
+    res.status(202).json({ success: true, notification: { id: row.id, status: row.status } });
+  }),
+);
+
+router.post(
+  "/sms/:id/retry",
+  asyncHandler(async (req, res) => {
+    const { id } = parse(uuidParam, req.params);
+    const row = await retrySms(id);
+    if (!row) throw new HttpError(404, "No failed or skipped SMS with this id.");
+    await audit(req, "sms.retry", { entityType: "sms_notification", entityId: id });
     res.json({ success: true });
   }),
 );

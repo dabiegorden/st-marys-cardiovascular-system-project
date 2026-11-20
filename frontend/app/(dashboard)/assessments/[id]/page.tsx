@@ -7,7 +7,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { HeartPulse, Loader2, Printer } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { AlertRecipient, Assessment, Feature, Metrics, RiskBandDef } from "@/lib/types";
+import type { AlertRecipient, Assessment, Feature, FollowUpCase, Metrics, RiskBandDef, SmsAlertRecipient } from "@/lib/types";
+import { CasePanel, OutcomePanel } from "@/components/follow-up";
+import { useMe } from "@/lib/hooks";
+import { Mail, MessageSquare } from "lucide-react";
 import { NotificationStatusBadge } from "@/components/notification-status";
 import { dateTime } from "@/lib/format";
 import { ErrorState, PageHeader } from "@/components/common";
@@ -28,6 +31,9 @@ interface Detail {
   };
   disclaimer: string;
   alerts: AlertRecipient[];
+  smsAlerts: SmsAlertRecipient[];
+  case: FollowUpCase | null;
+  outcomeRecordedByName: string | null;
 }
 
 export default function AssessmentDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -36,6 +42,7 @@ export default function AssessmentDetailPage({ params }: { params: Promise<{ id:
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["assessment", id], queryFn: () => api<Detail>(`/assessments/${id}`) });
   const [note, setNote] = useState<string | null>(null);
+  const { data: me } = useMe();
 
   const save = useMutation({
     mutationFn: (value: string) => api(`/assessments/${id}/note`, { method: "PATCH", json: { note: value } }),
@@ -52,7 +59,7 @@ export default function AssessmentDetailPage({ params }: { params: Promise<{ id:
 
   if (q.isLoading) return <PageLoading />;
   if (q.error || !q.data) return <ErrorState error={q.error} retry={() => q.refetch()} />;
-  const { assessment: a, model, disclaimer, alerts } = q.data;
+  const { assessment: a, model, disclaimer, alerts, smsAlerts, case: followUp, outcomeRecordedByName } = q.data;
   const currentNote = note ?? a.clinicianNote ?? "";
 
   return (
@@ -88,6 +95,12 @@ export default function AssessmentDetailPage({ params }: { params: Promise<{ id:
           </>
         }
       />
+
+      {followUp && (
+        <div className="mb-6">
+          <CasePanel c={followUp} assessmentId={a.id} isAdmin={me?.role === "admin"} />
+        </div>
+      )}
 
       <AssessmentResult
         assessment={a}
@@ -125,18 +138,36 @@ export default function AssessmentDetailPage({ params }: { params: Promise<{ id:
         </CardContent>
       </Card>
 
-      {alerts.length > 0 && (
+      <div className="mt-6">
+        <OutcomePanel a={a} recordedBy={outcomeRecordedByName} />
+      </div>
+
+      {(alerts.length > 0 || smsAlerts.length > 0) && (
         <Card className="no-print mt-6">
           <CardHeader>
-            <CardTitle className="text-base">Email alerts</CardTitle>
+            <CardTitle className="text-base">Alerts sent</CardTitle>
           </CardHeader>
           <CardContent>
             <ul className="divide-y">
+              {smsAlerts.map((al) => (
+                <li key={al.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm">
+                  <span className="flex items-center gap-2">
+                    <MessageSquare className="size-4 text-muted-foreground" aria-label="SMS" />
+                    <span className="font-medium">{al.recipientName ?? al.recipientPhone}</span>
+                    <span className="text-xs text-muted-foreground">+{al.recipientPhone}</span>
+                  </span>
+                  <span className="flex items-center gap-3 text-xs text-muted-foreground">
+                    {al.sentAt && dateTime(al.sentAt)}
+                    <NotificationStatusBadge status={al.status} />
+                  </span>
+                </li>
+              ))}
               {alerts.map((al) => (
                 <li key={al.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm">
-                  <span>
+                  <span className="flex items-center gap-2">
+                    <Mail className="size-4 text-muted-foreground" aria-label="Email" />
                     <span className="font-medium">{al.recipientName ?? al.recipientEmail}</span>
-                    <span className="ml-2 text-xs text-muted-foreground">{al.recipientEmail}</span>
+                    <span className="text-xs text-muted-foreground">{al.recipientEmail}</span>
                   </span>
                   <span className="flex items-center gap-3 text-xs text-muted-foreground">
                     {al.sentAt && dateTime(al.sentAt)}

@@ -1,44 +1,57 @@
 /**
  * notifications/scheduler.js – background jobs (node-cron)
  *
- *   email-outbox      OUTBOX_CRON  (default every minute)  deliver due / retry failed-temporarily emails
- *   high-risk-digest  DIGEST_CRON  (default 07:00 daily)   summary of the last 24 h for admins
+ *   alert-outbox       OUTBOX_CRON     (every minute)    deliver due email + SMS, retry with backoff
+ *   case-escalation    ESCALATION_CRON (every 15 min)    escalate high-risk cases nobody acknowledged
+ *   high-risk-digest   DIGEST_CRON     (07:00 daily)     summary of the last 24 h for admins
+ *   drift-check        DRIFT_CRON      (Mon 08:00)       email admins if inputs have shifted significantly
  */
 
 import cron from "node-cron";
 import { config } from "../config.js";
-import { enqueueDailyDigest, processOutbox } from "./outbox.js";
+import { enqueueDailyDigest, enqueueDriftAlert, processOutbox } from "./outbox.js";
+import { processSmsOutbox } from "./sms-outbox.js";
+import { escalateOverdueCases } from "../services/cases.js";
+import { driftReport } from "../services/insights.js";
 
 const tasks = [];
 
-export function startNotificationJobs() {
-  const { outboxCron, digestCron, timezone, enabled } = config.email;
-
-  if (!enabled) {
-    console.warn("⚠  Email alerts disabled – set RESEND_API_KEY and RESEND_EMAIL_FROM to enable them.");
-  }
-
-  if (!cron.validate(outboxCron)) throw new Error(`Invalid OUTBOX_CRON expression: "${outboxCron}"`);
+function schedule(name, expression, fn) {
+  if (expression === "off") return false;
+  if (!cron.validate(expression)) throw new Error(`Invalid cron expression for ${name}: "${expression}"`);
   tasks.push(
-    cron.schedule(outboxCron, () => processOutbox(), { name: "email-outbox", timezone, noOverlap: true }),
+    cron.schedule(
+      expression,
+      () => Promise.resolve(fn()).catch((err) => console.error(`[${name}]`, err.message)),
+      { name, timezone: config.email.timezone, noOverlap: true },
+    ),
   );
+  return true;
+}
 
-  if (digestCron !== "off") {
-    if (!cron.validate(digestCron)) throw new Error(`Invalid DIGEST_CRON expression: "${digestCron}"`);
-    tasks.push(
-      cron.schedule(
-        digestCron,
-        () => enqueueDailyDigest().catch((err) => console.error("[email] Digest error:", err.message)),
-        { name: "high-risk-digest", timezone, noOverlap: true },
-      ),
-    );
-  }
+export async function runDriftCheck() {
+  const report = await driftReport();
+  if (!report?.reliable || report.overall !== "significant") return 0;
+  const weekKey = new Intl.DateTimeFormat("en-CA", { timeZone: config.email.timezone }).format(new Date());
+  return enqueueDriftAlert({ report, weekKey });
+}
+
+export function startNotificationJobs() {
+  if (!config.email.enabled) console.warn("⚠  Email alerts disabled – set RESEND_API_KEY and RESEND_EMAIL_FROM.");
+  if (!config.sms.enabled) console.warn("⚠  SMS alerts disabled – set ARKESEL_API_KEY and ARKESEL_SENDER_ID.");
+  if (config.sms.enabled && config.sms.sandbox) console.warn("⚠  ARKESEL_SANDBOX=true – SMS are accepted by Arkesel but NOT delivered.");
+
+  schedule("alert-outbox", config.email.outboxCron, () => Promise.all([processOutbox(), processSmsOutbox()]));
+  schedule("case-escalation", config.followUp.escalationCron, () => escalateOverdueCases());
+  const digest = schedule("high-risk-digest", config.email.digestCron, () => enqueueDailyDigest());
+  const drift = schedule("drift-check", config.monitoring.driftCron, () => runDriftCheck());
 
   // Catch up on anything queued before the last restart
   processOutbox();
+  processSmsOutbox();
   console.log(
-    `✓ Background jobs: email outbox (${outboxCron})` +
-      (digestCron !== "off" ? `, daily digest (${digestCron}, ${timezone})` : ", daily digest off"),
+    `✓ Background jobs: alerts (${config.email.outboxCron}), escalation (${config.followUp.escalationCron}, after ${config.followUp.escalationHours} h)` +
+      `, digest (${digest ? config.email.digestCron : "off"}), drift (${drift ? config.monitoring.driftCron : "off"}) – ${config.email.timezone}`,
   );
 }
 
@@ -48,6 +61,12 @@ export function stopNotificationJobs() {
 }
 
 export function jobSchedule() {
-  const { outboxCron, digestCron, timezone } = config.email;
-  return { outboxCron, digestCron, timezone };
+  return {
+    outboxCron: config.email.outboxCron,
+    digestCron: config.email.digestCron,
+    escalationCron: config.followUp.escalationCron,
+    escalationHours: config.followUp.escalationHours,
+    driftCron: config.monitoring.driftCron,
+    timezone: config.email.timezone,
+  };
 }

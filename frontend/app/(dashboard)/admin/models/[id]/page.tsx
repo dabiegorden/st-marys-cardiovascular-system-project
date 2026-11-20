@@ -10,6 +10,7 @@ import { dateTime } from "@/lib/format";
 import { ErrorState, PageHeader } from "@/components/common";
 import { PageLoading } from "@/components/app-shell";
 import { ModelPerformance } from "@/components/model-performance";
+import { OperatingPointCard } from "@/components/operating-point";
 import { ActivateDialog } from "@/components/activate-dialog";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/status-badge";
@@ -51,7 +52,10 @@ export default function ModelVersionPage({ params }: { params: Promise<{ id: str
           )
         }
       />
-      <ModelPerformance manifest={m.manifest} />
+      <div className="space-y-6">
+        <OperatingPointCard model={m} />
+        <ModelPerformance manifest={m.manifest} />
+      </div>
     </>
   );
 }

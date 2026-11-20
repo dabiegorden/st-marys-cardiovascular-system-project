@@ -22,6 +22,7 @@
 10. [Testing and verification](#10-testing-and-verification)
 11. [Operations runbook](#11-operations-runbook)
     - [11a. Automated high-risk email alerts](#11a-automated-high-risk-email-alerts)
+    - [11b. Follow-up, local validation, SMS, 2FA, thresholds, drift, usability](#11b-follow-up-local-validation-sms-2fa-thresholds-drift-usability)
 12. [Limitations and open items](#12-limitations-and-open-items)
 13. [Decisions log](#13-decisions-log)
 
@@ -40,7 +41,7 @@ never as a diagnosis.
 | API | Node.js 22+, Express 5, Better Auth, zod, helmet |
 | Database | PostgreSQL on Neon, Drizzle ORM + drizzle-kit migrations |
 | Web app | Next.js 16 (App Router), React 19, Tailwind 4, shadcn/ui, TanStack Query, Recharts |
-| Notifications | Resend (email), node-cron (background jobs), transactional outbox table |
+| Notifications | Resend (email), Arkesel (SMS, Ghana), node-cron (background jobs), transactional outbox tables |
 
 **Removed** compared with the original prototype: the MongoDB layer, the CNN/CNN-LSTM models, the
 "federated learning" tab, the multi-model clinical endpoints, and the Google Gemini integration
@@ -54,9 +55,9 @@ never as a diagnosis.
 |---|---|---|
 | (a) Authorised users enter patient data and obtain predictions | Login → *New assessment* form generated from the model's feature spec → result page; every assessment stored against patient, user and model version | Screens in §8; functional tests in §10 |
 | (b) Train and integrate a Random Forest | [train_random_forest.py](../model_training/train_random_forest.py) → ONNX + manifest → loaded by [registry.js](../backend/src/ml/registry.js) | Training log; parity test (Python = Node to 1e-5) |
-| (c) Evaluate with accuracy, precision, recall, F1, confusion matrix | Manifest stores those plus specificity, ROC-AUC, Brier score, ROC curve, calibration curve, CV mean ± SD, and baselines; shown on **Model performance** | §4.4; `/model` page |
-| (d) Authentication, access control, data protection | Better Auth (hashed passwords, DB sessions, rate limiting), roles admin/clinician enforced in the API, forced password change, account disabling, audit log, data minimisation (no names), security headers | §5; RBAC tests |
-| (e) Functionality and usability testing | Automated tests (13), API end-to-end checks, browser screenshots; SUS study still to be run with staff | §10, §12 |
+| (c) Evaluate with accuracy, precision, recall, F1, confusion matrix | Internal and external evaluation (specificity, ROC-AUC, Brier, ROC, calibration, CV, baselines), **plus local validation on Saint Mary's outcomes with 95% CIs**, threshold analysis and **decision-curve analysis** | §4.4, §11b; `/model`, `/admin/models/[id]` |
+| (d) Authentication, access control, data protection | Better Auth (hashed passwords, DB sessions, rate limiting), roles admin/clinician enforced in the API, **TOTP two-factor sign-in (required for admins)**, forced password change, account disabling, audit log, data minimisation (no names, masked numbers in email/SMS), security headers | §5, §11b; RBAC + 2FA tests |
+| (e) Functionality and usability testing | 35 automated tests, API end-to-end checks, browser screenshots, **built-in SUS questionnaire with automatic scoring and task-time measurement** (`/admin/usability`) | §10, §11b |
 
 ---
 
@@ -318,6 +319,16 @@ assessments reference them.
 | `POST /api/admin/notifications/test` | 🛡 | Test email to yourself |
 | `POST /api/admin/notifications/digest` | 🛡 | Queue today's digest now |
 | `POST /api/admin/notifications/:id/retry` | 🛡 | Re-queue a failed/skipped email |
+| `GET /api/cases` · `POST /api/cases/:id/actions` | 👤 | Follow-up worklist; `{ action: acknowledge\|review\|refer\|close\|reopen\|note, note? }` |
+| `PUT /api/assessments/:id/outcome` | 👤 | `{ outcome: cvd_confirmed\|cvd_excluded\|null, source?, note? }` |
+| `GET /api/model/local-validation` | 👤 | Metrics on recorded outcomes with Wilson 95% CIs |
+| `GET/POST /api/me/sus` · `POST /api/me/sus/dismiss` | 👤 | Usability questionnaire |
+| `PUT /api/admin/models/:id/operating-point` | 🛡 | `{ threshold, lowMax, highMin, reason }` |
+| `GET /api/admin/monitoring/drift?days=` | 🛡 | PSI per input + prediction drift |
+| `GET /api/admin/usability` (+ `/export.csv`) | 🛡 | SUS results and task timing |
+| `GET /api/admin/sms` · `POST /api/admin/sms/test` · `POST /api/admin/sms/:id/retry` | 🛡 | SMS log, balance, sender status |
+| `POST /api/admin/users/:id/reset-2fa` | 🛡 | Remove a user's authenticator (lost phone) |
+| `/api/auth/two-factor/*` | 👤 | Better Auth: enable, verify-totp, verify-backup-code, disable, generate-backup-codes |
 
 Errors are `{ success: false, error, code?, errors?: [{ field, message }] }` with 400 for validation,
 401 unauthenticated, 403 forbidden / `PASSWORD_CHANGE_REQUIRED`, 404, 409 (job running / duplicate
@@ -487,6 +498,72 @@ retry classification and the backoff window.
 
 ---
 
+## 11b. Follow-up, local validation, SMS, 2FA, thresholds, drift, usability
+
+### High-risk follow-up (`/follow-up`)
+Every high-risk assessment opens a **case**: `open → acknowledged → reviewed → referred / closed` (reopen: admins).
+Review, refer and close require a note. Every action is recorded on a timeline and in the audit log.
+A background job (`ESCALATION_CRON`, every 15 min) **escalates** cases nobody acknowledged within
+`ESCALATION_HOURS` (default 4). It sends email and SMS to all admins and the responsible clinician, and
+repeats up to `MAX_ESCALATIONS` times. The page shows active and overdue cases, and the median time to
+acknowledge, which is a measurable Chapter 4 result.
+
+### Outcome recording and local validation
+On each assessment a clinician records the **confirmed outcome** (CVD confirmed or excluded, and how it
+was confirmed). `/model` then shows Saint Mary's own accuracy, sensitivity, specificity, PPV and AUC with
+**Wilson 95% confidence intervals**, next to the internal and external results. It also shows a confusion
+matrix, the observed CVD rate per risk band and a local decision curve. Results are flagged "preliminary"
+below 100 outcomes. This directly addresses limitation 1 (no local validation).
+
+### SMS alerts (Arkesel)
+- **Same outbox pattern as email:** a separate `sms_notifications` table, immediate send plus a retry sweep.
+- **Recipients:** the same people as email alerts, limited to staff with a phone number and SMS switched on.
+- **Message format:** GSM-7 only, a masked hospital number, no clinical values, about 1 to 2 segments.
+- **Retries:** limited to 1, 5 and 15 minutes. Arkesel has no idempotency key, so timeouts are *not*
+  retried (to avoid duplicate texts). 401, 402 (no balance), 403 and 422 are permanent failures.
+- **Admin view:** the Alerts page has an SMS tab with sender-ID approval, balance, log, test and retry.
+- **Verified 2026-11-20:** a sandbox send was accepted (no charge), the sender ID `Nsoatre` is approved,
+  and the balance was read.
+
+### Two-factor authentication
+- **Method:** TOTP authenticator app (Better Auth `twoFactor` plugin) with 10 one-time backup codes.
+- **Enforcement:** **required for admins** (`REQUIRE_ADMIN_2FA=true`); an admin without 2FA is held at `/setup-2fa`.
+- **Sign-in:** a code step with an optional 30-day trusted device; verification is rate-limited and audited.
+- **Admin tools:** an admin can **reset** another user's 2FA (lost phone). Settings offers new backup codes
+  and "sign out other devices".
+
+### Operating point and decision-curve analysis
+- **Stored analysis:** each model version stores a threshold table (sensitivity, specificity, PPV, NPV,
+  flagged rate per cut-off) and a decision curve for the internal and external test sets
+  (`model_training/cvd/analysis.py`; older versions are augmented with `augment_manifest.py` and synced with
+  `npm run models:sync`).
+- **Admin control:** on `/admin/models/[id]` an admin compares the current and a proposed threshold and
+  risk bands, then saves them with a **mandatory clinical reason** (audited).
+- **Scope:** changes apply to new assessments; each assessment stores the threshold used.
+- **Finding:** on the external data a 0.7 threshold trades sensitivity 92 % → 84 % for specificity
+  60 % → 71 %, and the model has positive net benefit over "treat all" from about 0.1 to 0.84.
+
+### Data-drift monitoring (`/admin/monitoring`)
+- **Method:** the population stability index (PSI) for each input compares recent patients with the
+  training split's decile bins (stored in the manifest). Below 0.10 is stable, 0.10–0.25 a moderate shift,
+  above 0.25 a significant shift. Prediction drift is tracked too (flagged rate against training prevalence).
+- **Background job:** a weekly check (`DRIFT_CRON`) emails admins when at least 30 recent assessments show
+  a significant shift.
+
+### Usability study (`/admin/usability`)
+- **Questionnaire:** after their 5th assessment (`SUS_PROMPT_AFTER`) each user is offered the 10-item
+  **System Usability Scale**, which they can postpone.
+- **Scoring:** automatic (Brooke 1996), with grade and adjective rating (Bangor 2009; 68 = benchmark),
+  per-item means, results by role and CSV export.
+- **Task timing:** the assessment form records its completion time automatically, giving the median task
+  time and a learning curve (1st–3rd, 4th–10th, 11th+ assessment). This provides the evidence for objective (e).
+
+**Tests (35):** besides the earlier ones, these cover Wilson intervals, AUC, the classification report,
+the decision curve, PSI and binning, SUS scoring, case transitions, Ghana phone normalisation,
+GSM-safe masked SMS text, Arkesel error classification and admin 2FA enforcement.
+
+---
+
 ## 12. Limitations and open items
 
 1. **Not clinically validated.** Before clinical reliance, evaluate on de-identified Saint Mary's records
@@ -496,7 +573,7 @@ retry classification and the backoff window.
 4. **`slope = 0` artefact** in the training data (see §4.4).
 5. **Exercise-test variables** (max heart rate, exercise angina, oldpeak, slope) assume a stress test was
    done. Confirm with clinicians how often these are available at the hospital.
-6. **Usability evaluation (SUS)** and a formal test-case table are still to be produced.
+6. The SUS questionnaire is built in; it still has to be **run with 5–10 staff**, and a formal test-case table written for Chapter 4.
 7. Email alerts depend on staff email addresses being correct and monitored. Resend delivery events
    (bounces, complaints) are not yet consumed. A webhook endpoint (`email.bounced` / `email.delivered`)
    would close that loop.

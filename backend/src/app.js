@@ -10,7 +10,7 @@ import { toNodeHandler, fromNodeHeaders } from "better-auth/node";
 
 import { config } from "./config.js";
 import { auth } from "./auth/auth.js";
-import { loadSession, requireRole } from "./middleware/auth.js";
+import { loadSession, requireRole, setRequireAdmin2fa } from "./middleware/auth.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { getActiveModel } from "./ml/registry.js";
 import clinicalRouter from "./routes/clinical.js";
@@ -18,6 +18,7 @@ import adminRouter from "./routes/admin.js";
 
 export function createApp() {
   const app = express();
+  setRequireAdmin2fa(config.security.requireAdmin2fa);
 
   // Requests arrive through the Next.js proxy (and later a reverse proxy)
   app.set("trust proxy", 1);

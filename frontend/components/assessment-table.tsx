@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import type { AssessmentListItem } from "@/lib/types";
 import { dateTime, prob, resultLabel } from "@/lib/format";
 import { RiskBadge } from "@/components/common";
+import { OutcomeBadge } from "@/components/follow-up";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 export function AssessmentTable({ items, showPatient = true }: { items: AssessmentListItem[]; showPatient?: boolean }) {
@@ -18,6 +19,7 @@ export function AssessmentTable({ items, showPatient = true }: { items: Assessme
             <TableHead>Result</TableHead>
             <TableHead className="text-right">Probability</TableHead>
             <TableHead>Risk</TableHead>
+            <TableHead>Outcome</TableHead>
             <TableHead>Clinician</TableHead>
             <TableHead>Model</TableHead>
           </TableRow>
@@ -40,6 +42,9 @@ export function AssessmentTable({ items, showPatient = true }: { items: Assessme
               <TableCell className="text-right tabular-nums">{prob(a.probability)}</TableCell>
               <TableCell>
                 <RiskBadge band={a.riskBand} />
+              </TableCell>
+              <TableCell>
+                <OutcomeBadge outcome={a.outcome} />
               </TableCell>
               <TableCell className="text-muted-foreground">{a.clinicianName ?? "—"}</TableCell>
               <TableCell className="font-mono text-xs text-muted-foreground">{a.modelVersion}</TableCell>
